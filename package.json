@@ -19,7 +19,8 @@
     "cost-optimization"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.1.0",

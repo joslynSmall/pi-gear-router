@@ -30,7 +30,7 @@ export const GENERIC_DEFAULT_GEARS: Record<"light" | "standard" | "heavy", GearT
  * on four of eight tasks and returned a 502 on a fifth. Its cheapness does not survive contact
  * with real tasks.
  *
- * Copy this block into `settings.gears` in `~/.pi/agent/pi-gear-router.json` to use it.
+ * Copy this block into `settings.gears` in `~/.pi/agent/pi-gear-router/settings.json` to use it.
  */
 export const MAGPIE_DEFAULT_GEARS: Record<"light" | "standard" | "heavy", GearTarget> = {
 	light: { provider: "magpie", model: "luckyg/space-bunny-free", thinkingLevel: "low" },
@@ -38,14 +38,6 @@ export const MAGPIE_DEFAULT_GEARS: Record<"light" | "standard" | "heavy", GearTa
 	heavy: { provider: "magpie", model: "zies/gpt-6.1-sol", thinkingLevel: "high" },
 };
 
-/**
- * Whether a gear target uses a free endpoint. Kept for display only: the router has no
- * pricing table, so it cannot cost-account a turn on its own.
- */
-export function isFreeLabel(target: GearTarget): boolean {
-	return target.model.toLowerCase().includes("free");
-}
-
 export function cloneSettings(settings: GearSettings): GearSettings {
-	return { ...settings, gears: { ...settings.gears } };
+	return structuredClone(settings);
 }
