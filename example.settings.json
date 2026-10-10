@@ -1,0 +1,45 @@
+// pi-gear-router 配置示例（JSONC，支持 // 与 /* */ 注释）。
+// 复制为 ~/.pi/agent/pi-gear-router/settings.json（用户级）
+// 或 <项目根>/.pi/pi-gear-router/settings.json（项目级，按字段覆盖用户级）。
+// 省略任何字段都会使用内置默认值。
+{
+  // 是否启用路由。false 时不调用 Jev，优先沿用最近实际使用的物理模型与等级。
+  "enabled": true,
+
+  // -1..1。按 gearBias × 0.4 平移分数后落档：负值偏向低成本档位，正值偏向高能力档位。
+  "gearBias": 0,
+
+  // 分数区间 → 档位 + thinking level。有序数组，下标即能力区间。
+  // 前 N-1 项必须带 max（升序、位于 (0,2) 之间），最后一项省略 max 并兜底到 2.0。
+  // 长度 1..16；省略则使用内置默认五档。gear 必须是 gears 中配置的档位名。
+  "bands": [
+    { "max": 0.5, "gear": "light",    "thinkingLevel": "high" },
+    { "max": 1.0, "gear": "standard", "thinkingLevel": "medium" },
+    { "max": 1.5, "gear": "standard", "thinkingLevel": "high" },
+    { "max": 1.8, "gear": "heavy",    "thinkingLevel": "high" },
+    {               "gear": "heavy",    "thinkingLevel": "xhigh" }
+  ],
+
+  // 三个物理档位：provider/model 必须指向 Pi 已配置且已鉴权的目标。
+  // thinkingLevel 只在 direct、无有效判决、兜底等没有区间等级可用的场合生效。
+  "gears": {
+    "light":    { "provider": "yourprovider", "model": "cheap-model-id",    "thinkingLevel": "high" },
+    "standard": { "provider": "yourprovider", "model": "balanced-model-id", "thinkingLevel": "medium" },
+    "heavy":    { "provider": "yourprovider", "model": "frontier-model-id", "thinkingLevel": "high" }
+  },
+
+  // Jev 分类调用的超时（毫秒）。连接失败会在此窗口内做有界重试。
+  "judgeTimeoutMs": 15000,
+
+  // 任务感知路由参数。省略则使用内置默认。
+  "taskRouting": {
+    // 连续免评估回合上限；0 关闭跨轮免评估。整数 0..10。
+    "maxInheritedTurns": 3,
+    // 降档所需的最近可信、不同上下文样本数。整数 2..8。
+    "downgradeWindow": 2,
+    // 降档目标边界的保护裕量。0..0.15。
+    "downgradeMargin": 0.08,
+    // 评分与关系确认门槛，不等同于准确率。0.5..1。
+    "minConfidence": 0.8
+  }
+}

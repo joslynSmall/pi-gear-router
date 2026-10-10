@@ -26,8 +26,40 @@ function fileSignature(path: string): string | undefined {
 	} catch { return undefined; }
 }
 
+/** Strip line and block comments from JSONC while preserving string contents such as `https://`. */
+function stripJsonComments(text: string): string {
+	let result = "";
+	let inString = false;
+	let escaped = false;
+	for (let index = 0; index < text.length; index++) {
+		const char = text.charAt(index);
+		if (inString) {
+			result += char;
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === "\"") inString = false;
+			continue;
+		}
+		if (char === "\"") { inString = true; result += char; continue; }
+		if (char === "/" && text.charAt(index + 1) === "/") {
+			while (index < text.length && text.charAt(index) !== "\n") index++;
+			result += "\n";
+			continue;
+		}
+		if (char === "/" && text.charAt(index + 1) === "*") {
+			index += 2;
+			while (index < text.length && !(text.charAt(index) === "*" && text.charAt(index + 1) === "/")) index++;
+			index++;
+			result += " ";
+			continue;
+		}
+		result += char;
+	}
+	return result;
+}
+
 function readJson(path: string): unknown {
-	try { return JSON.parse(readFileSync(path, "utf8")); } catch { return undefined; }
+	try { return JSON.parse(stripJsonComments(readFileSync(path, "utf8"))); } catch { return undefined; }
 }
 
 /**

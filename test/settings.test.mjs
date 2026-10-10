@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -139,4 +139,29 @@ test('project settings override user settings field by field', () => {
   assert.deepEqual(invalid.bands, defaultSettings().bands);
   rmSync(SETTINGS_PATH);
   rmSync(project, { recursive: true, force: true });
+});
+
+test('settings accept JSONC comments without corrupting strings', () => {
+  writeFileSync(SETTINGS_PATH, `{
+    // 行注释
+    "enabled": true, /* 块注释 */
+    "gearBias": -0.25,
+    "gears": { "light": { "provider": "p", "model": "https://example.com/a//b", "thinkingLevel": "high" } }
+  }`);
+  const s = loadSettings();
+  assert.equal(s.enabled, true);
+  assert.equal(s.gearBias, -0.25);
+  assert.equal(s.gears.light.model, 'https://example.com/a//b');
+  rmSync(SETTINGS_PATH);
+});
+
+test('the shipped example.settings.json is valid and loadable', () => {
+  const example = readFileSync(new URL('../example.settings.json', import.meta.url), 'utf8');
+  writeFileSync(SETTINGS_PATH, example);
+  const s = loadSettings();
+  assert.equal(s.enabled, true);
+  assert.equal(s.gears.light.provider, 'yourprovider');
+  assert.equal(s.bands.length, 5);
+  assert.equal(s.taskRouting.downgradeWindow, 2);
+  rmSync(SETTINGS_PATH);
 });
