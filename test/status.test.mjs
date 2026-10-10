@@ -60,7 +60,7 @@ test('fallback, disabled, restore and shutdown status are marked or cleared', as
     registerVirtualModel: (d) => { route = d.route; },
   });
   const result = await route({ reason: 'user', thinkingLevel: 'high', messages: [user] }, h.ctx);
-  assert.match(h.statuses.at(-1).text, /Jev 不可用 → standard\/medium fallback → test\/standard/);
+  assert.match(h.statuses.at(-1).text, /Jev 不可用 · classify-error → standard\/medium fallback → test\/standard/);
   h.branch.push({ type: 'custom', customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: result.state } });
   const start = h.handlers.get('session_start');
   await start({ type: 'session_start' }, h.ctx);

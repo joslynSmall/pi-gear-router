@@ -88,6 +88,11 @@ function dispatch(pair: PhysicalRoute): GearTarget {
 	return { provider: pair.model.provider, model: pair.model.id, thinkingLevel: pair.thinkingLevel };
 }
 
+/** Footer budget is tight; keep only the head of a diagnostic reason. */
+function shortReason(text: string): string {
+	return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
 function showStatus(ctx: ExtensionContext, state?: GearState, pending = false, trigger?: string): void {
 	if (ctx.mode !== "tui") return;
 	const theme = ctx.ui.theme;
@@ -100,8 +105,8 @@ function showStatus(ctx: ExtensionContext, state?: GearState, pending = false, t
 		return;
 	}
 	const result = state.decision?.source === "inherited"
-		? `沿用 Jev ${state.score.toFixed(2)} · 续接 ${state.task?.inheritedTurns ?? 0}/${loadSettings().taskRouting.maxInheritedTurns}`
-		: state.score >= 0 ? `Jev ${state.score.toFixed(2)}${state.decision?.action === "uncertain" ? " · 关系不明" : state.task?.review || (state.decision?.action === "hold" && (state.decision.requestedBand ?? 0) > bandForScore(state.adjustedScore)) ? " · 降档保护" : ""}` : "Jev 不可用";
+		? `沿用 Jev ${state.score.toFixed(2)} · 续接 ${state.task?.inheritedTurns ?? 0}/${loadSettings(ctx.cwd).taskRouting.maxInheritedTurns}`
+		: state.score >= 0 ? `Jev ${state.score.toFixed(2)}${state.decision?.action === "uncertain" ? " · 关系不明" : state.task?.review || (state.decision?.action === "hold" && (state.decision.requestedBand ?? 0) > bandForScore(state.adjustedScore, 0, loadSettings(ctx.cwd).bands)) ? " · 降档保护" : ""}` : state.decision?.judgeFailure ? `Jev 不可用 · ${shortReason(state.decision.judgeFailure)}` : "Jev 不可用";
 	const fallback = state.fallback ? " fallback" : "";
 	const label = `${result} → ${state.gear}/${state.dispatch.thinkingLevel}${fallback} → ${state.dispatch.provider}/${state.dispatch.model}`;
 	ctx.ui.setStatus(STATUS_KEY, theme.fg(state.fallback ? "warning" : "success", label));
@@ -136,7 +141,7 @@ export default function (pi: ExtensionAPI) {
 		maxTokens: 131_072,
 		async route(request: GearRequest, ctx: ExtensionContext): Promise<ModelRoute<GearState>> {
 			request.signal?.throwIfAborted();
-			const settings = loadSettings();
+			const settings = loadSettings(ctx.cwd);
 			const old = request.state;
 			if (request.reason === "direct") {
 				const pair = !settings.enabled ? previousPair(request, ctx)
@@ -204,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 				decision = await decideTask({
 					...(id ? { turnId: id } : {}), messages: request.messages, ...(old ? { previous: old } : {}), settings,
 					policyFingerprint: policyFingerprint(settings),
-					facts: branchFacts(ctx, validTask(old?.task), request.messages, observationSupported),
+					facts: branchFacts(ctx, validTask(old?.task, settings.bands.length), request.messages, observationSupported),
 					savedDispatchUsable: !!saved && saved.thinkingLevel === old?.dispatch?.thinkingLevel,
 				}, (context, signal, trigger) => {
 					showStatus(ctx, undefined, true, trigger);
@@ -216,7 +221,7 @@ export default function (pi: ExtensionAPI) {
 				throw error;
 			}
 			const judgment = decision.judgment;
-			const desired = decision.requestedBand !== undefined ? targetForBand(decision.requestedBand) : undefined;
+			const desired = decision.requestedBand !== undefined ? targetForBand(settings, decision.requestedBand) : undefined;
 			const wanted = desired?.gear ?? old?.gear ?? FALLBACK_GEAR;
 			const thinkingLevel = desired?.thinkingLevel ?? old?.dispatch?.thinkingLevel;
 			const retained = decision.retainSavedDispatch && old ? saved ?? previousPair(request, ctx) : undefined;

@@ -7,7 +7,7 @@ import type { Band, BranchFacts, DecisionTrace, GearJudgment, GearSettings, Gear
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export function policyFingerprint(settings: GearSettings): string {
 	return hash({ version: `task-window-v1:${CONTEXT_VERSION}:judge-task-v1:verify-command-v1`, classifier: "typesafe/jev-latest", enabled: settings.enabled,
-		bias: settings.gearBias, gears: [settings.gears.light, settings.gears.standard, settings.gears.heavy].map(t => [t.provider, t.model, t.thinkingLevel]), timeout: settings.judgeTimeoutMs,
+		bias: settings.gearBias, bands: settings.bands.map(band => [band.max ?? null, band.gear, band.thinkingLevel]), gears: [settings.gears.light, settings.gears.standard, settings.gears.heavy].map(t => [t.provider, t.model, t.thinkingLevel]), timeout: settings.judgeTimeoutMs,
 		policy: [settings.taskRouting.maxInheritedTurns, settings.taskRouting.downgradeWindow, settings.taskRouting.downgradeMargin, settings.taskRouting.minConfidence] });
 }
 const finite = (v: unknown, min: number, max: number) => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
@@ -16,12 +16,12 @@ const digest = (v: unknown) => typeof v === "string" && /^[a-f0-9]{64}$/.test(v)
 function sample(v: Sample): boolean {
 	return !!v && string(v.turnId) && digest(v.evidenceKey) && finite(v.rawScore, 0, 2) && finite(v.confidence, 0, 1);
 }
-export function validTask(value: unknown): TaskState | undefined {
+export function validTask(value: unknown, bandCount: number): TaskState | undefined {
 	try {
 		if (!value || typeof value !== "object" || Buffer.byteLength(JSON.stringify(value)) > 65536) return;
 		const t = value as TaskState;
 		if (t.version !== 1 || !string(t.taskId, 300) || !string(t.anchor, 16000) || Array.from(t.anchor).length > 4000
-			|| !["confirmed", "uncertain"].includes(t.continuity) || !Number.isInteger(t.committedBand) || !finite(t.committedBand, 0, 4)
+			|| !["confirmed", "uncertain"].includes(t.continuity) || !Number.isInteger(t.committedBand) || t.committedBand < 0 || t.committedBand >= bandCount
 			|| !finite(t.committedRawScore, 0, 2) || !finite(t.biasAtCommit, -1, 1) || !digest(t.policyFingerprint)
 			|| !Number.isInteger(t.inheritedTurns) || !finite(t.inheritedTurns, 0, 10) || typeof t.requireRejudge !== "boolean"
 			|| !Array.isArray(t.userChanges) || t.userChanges.length > 3 || t.userChanges.some(v => typeof v !== "string")
@@ -66,7 +66,7 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 	signal?.throwIfAborted();
 	const { settings, facts, previous, turnId } = input;
 	const policy = settings.taskRouting;
-	const task = validTask(previous?.task);
+	const task = validTask(previous?.task, settings.bands.length);
 	const context = buildTaskContext(input.messages, task, facts);
 	const continuation = isContinuation(context.request) && !context.nonTextInput;
 	const key = hash({ version: CONTEXT_VERSION, scope: task?.taskId ?? "initial", ...context,
@@ -91,6 +91,7 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 	signal?.throwIfAborted();
 	const trace: DecisionTrace = { source: outcome.judgment ? "judged" : "fallback", action: "hold", trigger,
 		classifierAttempted: outcome.attempted !== false,
+		...(outcome.failure !== undefined ? { judgeFailure: outcome.failure } : {}),
 		...(outcome.usageReported !== undefined ? { usageReported: outcome.usageReported } : {}),
 		...(outcome.relation ? { relation: outcome.relation } : {}),
 		...(outcome.relationConfidence !== undefined ? { relationConfidence: outcome.relationConfidence } : {}),
@@ -107,7 +108,7 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 		trace.action = "fallback";
 		return { task, retainSavedDispatch: true, trace };
 	}
-	const scoreBand = bandForScore(judgment.score, settings.gearBias);
+	const scoreBand = bandForScore(judgment.score, settings.gearBias, settings.bands);
 	const trustedScore = judgment.confidence >= policy.minConfidence;
 	const relationTrusted = outcome.kind === "valid" && outcome.relation !== "uncertain"
 		&& (outcome.relationConfidence ?? 0) >= policy.minConfidence && (outcome.relationProbability ?? 0) >= policy.minConfidence;
@@ -131,8 +132,8 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 	}
 	task.continuity = "confirmed";
 	if (changed && task.biasAtCommit !== settings.gearBias
-		&& task.committedBand === bandForScore(task.committedRawScore, task.biasAtCommit)) {
-		task.committedBand = bandForScore(task.committedRawScore, settings.gearBias);
+		&& task.committedBand === bandForScore(task.committedRawScore, task.biasAtCommit, settings.bands)) {
+		task.committedBand = bandForScore(task.committedRawScore, settings.gearBias, settings.bands);
 		task.biasAtCommit = settings.gearBias;
 		trace.action = "config-remap";
 	}
@@ -156,10 +157,10 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 			const max = task.samples.reduce((a, b) => a.rawScore >= b.rawScore ? a : b);
 			trace.windowMaxRaw = max.rawScore;
 			trace.protectedScore = clampScore(clampScore(max.rawScore + settings.gearBias * 0.4) + policy.downgradeMargin);
-			const candidate = bandForScore(trace.protectedScore);
+			const candidate = bandForScore(trace.protectedScore, 0, settings.bands);
 			if (candidate < task.committedBand) { task.committedBand = candidate; task.committedRawScore = max.rawScore; task.biasAtCommit = settings.gearBias; trace.action = "downgrade"; }
 		}
-		if (bandForScore(clampScore(clampScore(judgment.score + settings.gearBias * .4) + policy.downgradeMargin)) < task.committedBand) {
+		if (bandForScore(clampScore(clampScore(judgment.score + settings.gearBias * .4) + policy.downgradeMargin), 0, settings.bands) < task.committedBand) {
 			task.review = { evidenceKey: key, expedited: !seen };
 		} else delete task.review;
 	}

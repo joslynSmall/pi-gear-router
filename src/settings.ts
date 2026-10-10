@@ -3,45 +3,57 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultSettings } from "./gears.ts";
 import { cloneSettings } from "./defaults.ts";
-import type { Gear, GearSettings, GearTarget } from "./types.ts";
+import { MAX_BANDS, type BandSpec, type Gear, type GearSettings, type GearTarget } from "./types.ts";
 
 /** Overridable so tests and throwaway runs do not touch the user's real config. */
 const DATA_DIR = process.env.PI_GEAR_ROUTER_DATA_DIR ?? join(homedir(), ".pi", "agent", "pi-gear-router");
 const SETTINGS_PATH = join(DATA_DIR, "settings.json");
 
+/** Project-level override, mirroring the user layout under the project's `.pi` directory. */
+export function projectSettingsPath(cwd: string): string {
+	return join(cwd, ".pi", "pi-gear-router", "settings.json");
+}
+
 const GEAR_NAMES: readonly Gear[] = ["light", "standard", "heavy"];
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 let cache: { signature: string; settings: GearSettings } | undefined;
+
+/** File identity for the settings cache: changes whenever the file is replaced or rewritten. */
+function fileSignature(path: string): string | undefined {
+	try {
+		const stat = statSync(path, { bigint: true });
+		return `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+	} catch { return undefined; }
+}
+
+function readJson(path: string): unknown {
+	try { return JSON.parse(readFileSync(path, "utf8")); } catch { return undefined; }
+}
 
 /**
  * Read settings, falling back to defaults.
  *
  * Deliberately lenient: a malformed or partial file must not stop the agent from running, so
- * any gear we cannot read keeps its default target. gearshift is strict here and disables
+ * any gear we cannot read keeps its fallback target. gearshift is strict here and disables
  * routing; for a router that is an optimisation, degrading is better than failing.
+ *
+ * Passing `cwd` layers the project file `.pi/pi-gear-router/settings.json` over the user file:
+ * fields it sets win, everything else inherits the user value, and an invalid project field
+ * falls back to the user value rather than the built-in default.
  */
-export function loadSettings(): GearSettings {
-	let signature: string;
-	try {
-		const stat = statSync(SETTINGS_PATH, { bigint: true });
-		signature = `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-	} catch {
-		cache = undefined;
-		return defaultSettings();
-	}
+export function loadSettings(cwd?: string): GearSettings {
+	const agentSignature = fileSignature(SETTINGS_PATH);
+	const projectPath = cwd ? projectSettingsPath(cwd) : undefined;
+	const projectSignature = projectPath ? fileSignature(projectPath) : undefined;
+	const signature = `${agentSignature ?? "none"}|${projectPath ?? ""}|${projectSignature ?? "none"}`;
 	if (cache?.signature === signature) return cloneSettings(cache.settings);
-	let settings: GearSettings;
-	try {
-		settings = parseSettings(JSON.parse(readFileSync(SETTINGS_PATH, "utf8")));
-	} catch {
-		settings = defaultSettings();
-	}
+	const user = agentSignature ? parseSettings(readJson(SETTINGS_PATH), defaultSettings()) : defaultSettings();
+	const settings = projectSignature && projectPath ? parseSettings(readJson(projectPath), user) : user;
 	cache = { signature, settings };
 	return cloneSettings(settings);
 }
 
-function parseSettings(raw: unknown): GearSettings {
-	const fallback = defaultSettings();
+function parseSettings(raw: unknown, fallback: GearSettings): GearSettings {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return fallback;
 	const file = raw as Record<string, unknown>;
 
@@ -58,6 +70,7 @@ function parseSettings(raw: unknown): GearSettings {
 	return {
 		enabled: typeof file.enabled === "boolean" ? file.enabled : fallback.enabled,
 		gearBias: typeof file.gearBias === "number" && Math.abs(file.gearBias) <= 1 ? file.gearBias : fallback.gearBias,
+		bands: readBands(file.bands, fallback.bands),
 		gears,
 		taskRouting: readPolicy(file.taskRouting, fallback.taskRouting),
 		judgeTimeoutMs:
@@ -79,6 +92,31 @@ function readPolicy(value: unknown, fallback: GearSettings["taskRouting"]): Gear
 		downgradeMargin: read("downgradeMargin", 0, 0.15),
 		minConfidence: read("minConfidence", 0.5, 1),
 	};
+}
+
+function readBands(value: unknown, fallback: BandSpec[]): BandSpec[] {
+	const defaults = () => fallback.map((band) => ({ ...band }));
+	if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BANDS) return defaults();
+	const bands: BandSpec[] = [];
+	for (let index = 0; index < value.length; index++) {
+		const raw = value[index];
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return defaults();
+		const record = raw as Record<string, unknown>;
+		if (!GEAR_NAMES.includes(record.gear as Gear)) return defaults();
+		if (typeof record.thinkingLevel !== "string" || !THINKING_LEVELS.has(record.thinkingLevel)) return defaults();
+		const gear = record.gear as Gear;
+		const thinkingLevel = record.thinkingLevel as BandSpec["thinkingLevel"];
+		if (index === value.length - 1) {
+			if (record.max !== undefined) return defaults();
+			bands.push({ gear, thinkingLevel });
+			continue;
+		}
+		const max = record.max;
+		if (typeof max !== "number" || !Number.isFinite(max) || max <= 0 || max >= 2) return defaults();
+		if (max <= (bands.at(-1)?.max ?? 0)) return defaults();
+		bands.push({ max, gear, thinkingLevel });
+	}
+	return bands;
 }
 
 function readTarget(value: unknown): GearTarget | undefined {

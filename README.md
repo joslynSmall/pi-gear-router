@@ -8,13 +8,13 @@ Jev 输出连续 `0..2` 分数，路由按五个区间同时选择模型档位�
 
 | 调整后分数 | 模型档位 | thinking level |
 |---|---|---|
-| `0.0 ≤ score < 0.5` | light | low |
+| `0.0 ≤ score < 0.5` | light | high |
 | `0.5 ≤ score < 1.0` | standard | medium |
 | `1.0 ≤ score < 1.5` | standard | high |
 | `1.5 ≤ score < 1.8` | heavy | high |
 | `1.8 ≤ score ≤ 2.0` | heavy | xhigh |
 
-模型选择仍是三档；五段分数用于控制思考深度。区间边界取左闭右开，最后一段包含 `2.0`。
+上表是默认映射，可用 `bands` 覆盖；模型选择仍是三档，分档用于控制分数区间与思考深度。区间边界取左闭右开，最后一段包含 `2.0`。
 
 ## 为什么分三档
 
@@ -55,6 +55,13 @@ Pi 已内置 `typesafe/jev-latest` 分类器目录项，不需要单独在 `mode
 {
   "enabled": true,
   "gearBias": 0,
+  "bands": [
+    { "max": 0.5, "gear": "light",    "thinkingLevel": "high" },
+    { "max": 1.0, "gear": "standard", "thinkingLevel": "medium" },
+    { "max": 1.5, "gear": "standard", "thinkingLevel": "high" },
+    { "max": 1.8, "gear": "heavy",    "thinkingLevel": "high" },
+    {               "gear": "heavy",    "thinkingLevel": "xhigh" }
+  ],
   "judgeTimeoutMs": 15000,
   "taskRouting": {
     "maxInheritedTurns": 3,
@@ -63,7 +70,7 @@ Pi 已内置 `typesafe/jev-latest` 分类器目录项，不需要单独在 `mode
     "minConfidence": 0.8
   },
   "gears": {
-    "light":    { "provider": "yourprovider", "model": "cheap-model-id",    "thinkingLevel": "low" },
+    "light":    { "provider": "yourprovider", "model": "cheap-model-id",    "thinkingLevel": "high" },
     "standard": { "provider": "yourprovider", "model": "balanced-model-id", "thinkingLevel": "medium" },
     "heavy":    { "provider": "yourprovider", "model": "frontier-model-id", "thinkingLevel": "high" }
   }
@@ -76,15 +83,27 @@ Pi 已内置 `typesafe/jev-latest` 分类器目录项，不需要单独在 `mode
 
 配置按文件元数据缓存，修改后在下一次路由调用时重新读取；返回值彼此隔离，不共享可变默认对象。本轮已选定的物理模型不会因为配置文件被修改而在工具跟进中变化。
 
+### 项目级配置
+
+除用户级文件外，可在项目里放 `<项目根>/.pi/pi-gear-router/settings.json`，与用户级配置按字段合并：项目文件里出现的字段覆盖用户级，未出现的继承用户级；`gears` 按档位合并，`bands` 数组整体替换；非法字段回落到用户级值。修改后同样在下一次路由调用时重新读取。
+
+读取**不检查项目信任状态**：只要文件存在就生效。因此不要在不信任的仓库中随意运行带此文件的 Pi，先检查其内容。
+
 ### `enabled`
 
 默认 `true`。设为 `false` 时不调用 Jev：优先沿用最近实际使用的物理模型及 thinking level，没有历史模型时使用 `standard`（不可用时再尝试其他配置档位）。
 
 这不是恢复“之前手动选中的模型”的操作：当前选择仍是 `gears/auto`。如果要完全退出虚拟模型路由，请用 Pi 的 `/model` 选择物理模型。重新启用后，新的用户请求会重新评估。
 
+### `bands`
+
+分档表，决定「调整后分数 → 档位 + thinking level」。有序数组，下标即能力区间；前 N-1 项必须带 `max`（升序、位于 `(0,2)`），最后一项省略 `max` 并兜底到 `2.0`。长度 1..16。
+
+省略该字段时使用默认五档。任一项非法时整表回退默认值，不做部分生效。修改分档表属于配置变更，会让下一次用户回合重新评估；已冻结的同轮派发不变。`gear` 仍须是 `gears` 中配置的 `light`/`standard`/`heavy`。
+
 ### `gearBias`
 
-在原始分数上增加 `gearBias × 0.4`，再将结果限制在 `0..2`。然后按上述五个区间一起选择模型档位和思考深度：
+在原始分数上增加 `gearBias × 0.4`，再将结果限制在 `0..2`。然后按分档表一起选择模型档位和思考深度：
 
 | 值 | 效果 |
 |---|---|
@@ -153,13 +172,13 @@ continue / please continue / go on
 - `fallback` / `fallbackReason`：是否兜底及原因；
 - `dispatch`：实际物理模型与 thinking level，供同轮复用；
 - `task`：版本化、有界任务锚点、承诺能力、窗口、继承计数和分支观测 cursor；
-- `decision`：判决/继承/兜底来源、关系、触发原因、请求区间与保护分数。
+- `decision`：判决/继承/兜底来源、关系、触发原因、请求区间、保护分数和分类失败原因。
 
 `gear` 是实际档位，`decision.requestedBand` 是所需能力；物理目标不可用或等级裁剪不会改写任务需求。`score` 是最新真实评分，hold 时不伪造旧高分。继承沿用原分数和来源，本轮 `inputTokens=0`。
 
 ### 失败与降级边界
 
-- 分类器缺失、缺少密钥、超时或结果无效：已有上一轮派发记录时优先保留该物理模型，否则使用上一轮档位或 `standard`。下一次新的用户请求再尝试 Jev。
+- 分类器缺失、缺少密钥、超时或结果无效：已有上一轮派发记录时优先保留该物理模型，否则使用上一轮档位或 `standard`。下一次新的用户请求再尝试 Jev。连接失败（`fetch failed`）不受 Pi 的 provider 重试覆盖（该重试只处理带 HTTP 状态码的错误），因此在本插件的传输层于同一 `judgeTimeoutMs` 窗口内有界重试（最多 2 次、指数退避）。失败原因（`stopReason`／错误摘要）写入 `decision.judgeFailure` 并显示在状态栏，便于区分超时、代理或鉴权问题。
 - 目标模型不在目录、没有配置凭据或是另一个虚拟模型：依次尝试 `目标档 → standard → light → heavy → 历史物理模型`，重复档位只检查一次。
 - 所有候选都不可用：抛出包含真实配置路径的错误；没有可用物理模型时无法继续生成。
 - 已配置凭据不保证远端服务可用。实际 provider 网络错误、限流等由 Pi 的请求及重试机制处理，本扩展没有实现自动故障转移或同轮升级。
@@ -167,7 +186,7 @@ continue / please continue / go on
 
 ## 选择模型
 
-不能仅凭价格认定一个模型适合 light 档。强推理的便宜模型在高 effort 下可能耗尽预算却不输出答案。建议把 light 固定在较低 thinking level，并用真实任务验证。
+不能仅凭价格认定一个模型适合 light 档。强推理的便宜模型在高 effort 下可能耗尽预算却不输出答案。light 档默认请求 `high`，与五个能力区间一致；请用真实任务验证所选模型，必要时在 `settings.gears.light` 中把 thinking level 调低。
 
 `src/defaults.ts` 记录了本地 Magpie 网关的八项任务测量：space-bunny-free 在 high 下曾耗尽输出预算，在 low 下回答正常；Luna 与 Sol 都通过任务，但延迟不同。该测量只说明那次网关测试的表现，不代表通用模型排名或路由效果保证。
 

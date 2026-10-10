@@ -73,7 +73,7 @@ test('same turn repeated user routing reuses decision after transcript length ch
 test('auto thinking level follows the Jev band, not Pi manual thinking selection', async () => {
   const h = harness([0.2, 0.7, 1.2, 1.6, 1.9]);
   const expected = [
-    ['light', 'low'], ['standard', 'medium'], ['standard', 'high'],
+    ['light', 'high'], ['standard', 'medium'], ['standard', 'high'],
     ['heavy', 'high'], ['heavy', 'xhigh'],
   ];
   for (const [index, [gear, thinkingLevel]] of expected.entries()) {
@@ -104,6 +104,7 @@ test('failed judgment stores fallback once; next user turn tries Jev again', asy
   const first = await h.run();
   assert.equal(first.model.id, 'standard');
   assert.equal(first.state.fallback, true);
+  assert.equal(first.state.decision.judgeFailure, 'classify-error');
   await h.run({ reason: 'continuation', state: first.state });
   await h.run({ reason: 'retry', state: first.state });
   assert.equal(h.calls.length, 1);
@@ -299,4 +300,15 @@ test('continuation fallback stores its replacement pair when old dispatch become
   assert.equal(continuation.state.gear, 'standard');
   assert.equal(continuation.state.fallbackReason, 'target-unavailable');
   assert.equal(h.calls.length, 1);
+});
+
+test('custom bands drive gear and thinking dispatch', async () => {
+  const h = harness([0.9]);
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ gears: h.targets, bands: [
+    { max: 1, gear: 'light', thinkingLevel: 'low' },
+    { gear: 'heavy', thinkingLevel: 'xhigh' },
+  ] }));
+  const result = await h.run();
+  assert.equal(result.model.id, 'light');
+  assert.equal(result.thinkingLevel, 'low');
 });

@@ -78,7 +78,7 @@ test('task judge preserves timeout/cancellation and reports unavailable without 
   const h = harness(); const signal = new AbortController().signal;
   const input = { request: 'Task', recent: [], observations: [], nonTextInput: false };
   await judgeTask(h.ctx, input, 1234, signal);
-  assert.deepEqual(h.calls[0].options, { signal, timeoutMs: 1234 }); assert.deepEqual(Object.keys(h.calls[0].input.questions), ['gear']);
+  assert.equal(h.calls[0].options.signal, signal); assert.equal(h.calls[0].options.timeoutMs, 1234); assert.equal(typeof h.calls[0].options.fetch, 'function'); assert.deepEqual(Object.keys(h.calls[0].input.questions), ['gear']);
   for (const answer of [{ type: 'score', score: NaN, confidence: .9 }, { type: 'score', score: 2.1, confidence: .9 }, { type: 'score', score: 1, confidence: Infinity }, { type: 'score', score: 1, confidence: '0.9' }]) {
     h.ctx.modelRegistry.classify = async () => ({ stopReason: 'stop', answers: { gear: answer } });
     assert.equal((await judgeTask(h.ctx, input, 1234)).kind, 'unavailable');
@@ -111,4 +111,72 @@ test('invalid numeric verdicts do not accidentally select heavy', async () => {
     const h = harness(answer === undefined ? { type: 'missing' } : answer);
     assert.equal(await judgeGear(h.ctx, [user('task')], 1), null);
   }
+});
+
+test('unavailable verdicts carry a bounded diagnostic reason', async () => {
+  const h = harness();
+  const input = { request: 'Task', recent: [], observations: [], nonTextInput: false };
+  h.ctx.modelRegistry.classify = async () => ({ stopReason: 'error', answers: {}, errorMessage: 'upstream 503' });
+  let result = await judgeTask(h.ctx, input, 1000);
+  assert.equal(result.kind, 'unavailable');
+  assert.equal(result.failure, 'classify-error: upstream 503');
+  h.ctx.modelRegistry.classify = async () => ({ stopReason: 'aborted', answers: {} });
+  assert.equal((await judgeTask(h.ctx, input, 1000)).failure, 'classify-aborted');
+  h.ctx.modelRegistry.classify = async () => { throw new Error('Request timed out after 1000ms'); };
+  assert.equal((await judgeTask(h.ctx, input, 1000)).failure, 'Request timed out after 1000ms');
+  h.ctx.modelRegistry.classify = async () => ({ stopReason: 'stop', answers: { gear: { type: 'score', score: NaN, confidence: .9 } } });
+  assert.equal((await judgeTask(h.ctx, input, 1000)).failure, 'invalid-answer');
+  assert.equal((await judgeTask(h.ctx, { ...input, request: '' }, 1000)).failure, 'empty-request');
+  h.ctx.modelRegistry.getModelOfType = () => undefined;
+  result = await judgeTask(h.ctx, input, 1000);
+  assert.equal(result.failure, 'classifier-model-missing'); assert.equal(result.attempted, false);
+  h.ctx.modelRegistry.getModelOfType = () => ({});
+  h.ctx.modelRegistry.classify = async () => { throw new Error('x'.repeat(500)); };
+  assert.equal((await judgeTask(h.ctx, input, 1000)).failure.length, 200);
+});
+
+test('transport failures are retried and can recover within the judge window', async () => {
+  const h = harness();
+  const input = { request: 'Task', recent: [], observations: [], nonTextInput: false };
+  const realFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => { attempts++; if (attempts < 3) throw new TypeError('fetch failed'); return new Response('{}', { status: 200 }); };
+  h.ctx.modelRegistry.classify = async (_model, _context, options) => {
+    try { await options.fetch('http://classifier', {}); return { stopReason: 'stop', answers: { gear: { type: 'score', score: 1.1, confidence: .9 } }, usage: { input: 7 } }; }
+    catch (error) { return { stopReason: 'error', answers: {}, errorMessage: error.message }; }
+  };
+  try {
+    const result = await judgeTask(h.ctx, input, 5000);
+    assert.equal(result.kind, 'valid');
+    assert.equal(result.judgment.score, 1.1);
+    assert.equal(attempts, 3);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('transport failures stay bounded and preserve the reason after retries', async () => {
+  const h = harness();
+  const input = { request: 'Task', recent: [], observations: [], nonTextInput: false };
+  const realFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => { attempts++; throw new TypeError('fetch failed'); };
+  h.ctx.modelRegistry.classify = async (_model, _context, options) => {
+    try { await options.fetch('http://classifier', {}); return { stopReason: 'stop', answers: {} }; }
+    catch (error) { return { stopReason: 'error', answers: {}, errorMessage: error.message }; }
+  };
+  try {
+    const result = await judgeTask(h.ctx, input, 5000);
+    assert.equal(result.kind, 'unavailable');
+    assert.equal(result.failure, 'classify-error: fetch failed');
+    assert.equal(attempts, 3);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('non-transport classifier errors are not retried', async () => {
+  const h = harness();
+  const input = { request: 'Task', recent: [], observations: [], nonTextInput: false };
+  let calls = 0;
+  h.ctx.modelRegistry.classify = async () => { calls++; return { stopReason: 'error', answers: {}, errorMessage: 'System One API error (401): bad key' }; };
+  const result = await judgeTask(h.ctx, input, 5000);
+  assert.equal(calls, 1);
+  assert.equal(result.failure, 'classify-error: System One API error (401): bad key');
 });

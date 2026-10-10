@@ -99,7 +99,7 @@ test('configuration fingerprint ignores key order but reacts to effective values
 
 test('invalid and oversized task state is never eligible for inheritance', async () => {
   const h = setup(); const d = await h.run(undefined, 'Complex task', 1);
-  for (const t of [{ ...d.task, version: 2 }, { ...d.task, samples: [{ rawScore: NaN }] }, { ...d.task, anchor: 'x'.repeat(70000) }, { ...d.task, inheritedTurns: 11 }]) assert.equal(validTask(t), undefined);
+  for (const t of [{ ...d.task, version: 2 }, { ...d.task, samples: [{ rawScore: NaN }] }, { ...d.task, anchor: 'x'.repeat(70000) }, { ...d.task, inheritedTurns: 11 }]) assert.equal(validTask(t, h.settings.bands.length), undefined);
   const next = await h.run({ ...h.state(d), task: { ...d.task, version: 2 } }, '继续', 2);
   assert.equal(next.trace.source, 'judged');
 });
@@ -162,7 +162,7 @@ test('finite property grid checks band bounds and immediate same-task upgrades',
     const first = await h.run(undefined, 'Task', 1, a / 10);
     const next = await h.run(h.state(first), 'New constraint', 2, b / 10);
     assert.ok(next.requestedBand >= first.requestedBand && next.requestedBand <= 4);
-    assert.ok(validTask(next.task)); cases++;
+    assert.ok(validTask(next.task, h.settings.bands.length)); cases++;
   }
   assert.equal(cases, 2205);
 });
@@ -188,4 +188,37 @@ test('cancellation during judge leaves input unchanged and cannot return fallbac
   const previous = h.state(first), original = structuredClone(previous), abort = new AbortController();
   await assert.rejects(decideTask({ turnId: 'u2', previous, messages: [user('New work', 2)], settings: h.settings, policyFingerprint: policyFingerprint(h.settings), facts, savedDispatchUsable: true }, async () => { abort.abort(); return { kind: 'unavailable' }; }, abort.signal), { name: 'AbortError' });
   assert.deepEqual(previous, original);
+});
+
+test('band-count change rejudges and rejects an out-of-range committed band', async () => {
+  const h = setup();
+  let d = await h.run(undefined, 'Complex task', 1, 1.9);
+  assert.equal(d.task.committedBand, 4);
+  h.settings.bands = [
+    { max: 0.3, gear: 'light', thinkingLevel: 'low' },
+    { max: 0.6, gear: 'light', thinkingLevel: 'high' },
+    { max: 1.0, gear: 'standard', thinkingLevel: 'medium' },
+    { max: 1.4, gear: 'standard', thinkingLevel: 'high' },
+    { max: 1.7, gear: 'heavy', thinkingLevel: 'high' },
+    { gear: 'heavy', thinkingLevel: 'xhigh' },
+  ];
+  d = await h.run(h.state(d), 'Continue', 2, 0.2);
+  assert.equal(d.trace.trigger, 'config-changed');
+  assert.ok(d.trace.requestedBand <= h.settings.bands.length - 1);
+  h.settings.bands = [
+    { max: 1, gear: 'light', thinkingLevel: 'low' },
+    { gear: 'heavy', thinkingLevel: 'xhigh' },
+  ];
+  const stale = { ...h.state(d), task: { ...d.task, committedBand: 4 } };
+  const next = await h.run(stale, 'Continue again', 3, 0.2);
+  assert.equal(next.task.committedBand, 0);
+  assert.notEqual(next.task.taskId, d.task.taskId);
+});
+
+test('unavailable classifier reason is preserved in the decision trace', async () => {
+  const h = setup();
+  const d = await decideTask({ turnId: 'u1', messages: [user('Task', 1)], settings: h.settings, policyFingerprint: policyFingerprint(h.settings), facts, savedDispatchUsable: true },
+    async () => ({ kind: 'unavailable', attempted: true, failure: 'classify-error: upstream 503' }));
+  assert.equal(d.trace.source, 'fallback');
+  assert.equal(d.trace.judgeFailure, 'classify-error: upstream 503');
 });

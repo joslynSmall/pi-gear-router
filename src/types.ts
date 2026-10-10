@@ -55,13 +55,15 @@ export interface GearSettings {
 	enabled: boolean;
 	/** -1..1 shifts scores by up to ±0.4. 0 is neutral. */
 	gearBias: number;
+	/** Ordered score bands; the last entry omits `max`. Overrides the built-in mapping when valid. */
+	bands: BandSpec[];
 	gears: Record<Gear, GearTarget>;
 	/** Jev call timeout in milliseconds. Decision calls need more than the usual 5s. */
 	judgeTimeoutMs: number;
 	taskRouting: TaskRoutingSettings;
 }
 
-export type Band = 0 | 1 | 2 | 3 | 4;
+export type Band = number;
 export type TaskRelation = "same_task" | "new_task" | "uncertain";
 export interface TaskRoutingSettings {
 	maxInheritedTurns: number;
@@ -98,6 +100,8 @@ export interface DecisionTrace {
 	trigger: string;
 	action: "new-task" | "upgrade" | "hold" | "downgrade" | "uncertain" | "inherit" | "fallback" | "config-remap";
 	classifierAttempted: boolean;
+	/** Why the classifier was unavailable, when it failed. */
+	judgeFailure?: string;
 	scoreTurnId?: string;
 	requestedBand?: Band;
 	windowMaxRaw?: number;
@@ -131,13 +135,28 @@ export interface JudgeOutcome {
 	relationProbability?: number;
 	usageReported?: boolean;
 	attempted?: boolean;
+	/** Bounded diagnostic reason when `kind` is `unavailable`, for the decision trace and footer. */
+	failure?: string;
 }
 
-/** Score thresholds for the five model/thinking-level bands. */
-export const LIGHT_MAX = 0.5;
-export const STANDARD_MEDIUM_MAX = 1;
-export const STANDARD_MAX = 1.5;
-export const HEAVY_XHIGH_MIN = 1.8;
+/** One score band: an exclusive upper bound plus the capability it maps to. The last band omits `max`. */
+export interface BandSpec {
+	max?: number;
+	gear: Gear;
+	thinkingLevel: ModelThinkingLevel;
+}
+
+/** Default bands; `max` is the exclusive upper bound of the adjusted score, and the last band covers up to 2. */
+export const DEFAULT_BANDS: readonly BandSpec[] = [
+	{ max: 0.5, gear: "light", thinkingLevel: "high" },
+	{ max: 1, gear: "standard", thinkingLevel: "medium" },
+	{ max: 1.5, gear: "standard", thinkingLevel: "high" },
+	{ max: 1.8, gear: "heavy", thinkingLevel: "high" },
+	{ gear: "heavy", thinkingLevel: "xhigh" },
+];
+
+/** Guard against a malformed config producing an unbounded band table. */
+export const MAX_BANDS = 16;
 
 /** Largest score shift `gearBias` of 1 can apply. */
 export const MAX_BIAS_SHIFT = 0.4;

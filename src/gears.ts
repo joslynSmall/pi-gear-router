@@ -1,11 +1,9 @@
 import { GENERIC_DEFAULT_GEARS } from "./defaults.ts";
 import {
-	HEAVY_XHIGH_MIN,
-	LIGHT_MAX,
+	DEFAULT_BANDS,
 	MAX_BIAS_SHIFT,
-	STANDARD_MAX,
-	STANDARD_MEDIUM_MAX,
 	type Band,
+	type BandSpec,
 	type Gear,
 	type GearSettings,
 	type GearTarget,
@@ -26,35 +24,35 @@ export function clampScore(score: number): number {
 export function gearForScore(
 	score: number,
 	gearBias: number,
+	bands: readonly BandSpec[] = DEFAULT_BANDS,
 ): { gear: Gear; thinkingLevel: ModelThinkingLevel; adjustedScore: number } {
 	const adjustedScore = clampScore(score + gearBias * MAX_BIAS_SHIFT);
-	return { ...targetForBand(bandForScore(adjustedScore)), adjustedScore };
+	const spec = bands[bandForScore(adjustedScore, 0, bands)]!;
+	return { gear: spec.gear, thinkingLevel: spec.thinkingLevel, adjustedScore };
 }
 
 export function defaultSettings(): GearSettings {
 	return {
 		enabled: true,
 		gearBias: 0,
+		bands: DEFAULT_BANDS.map((band) => ({ ...band })),
 		gears: structuredClone(GENERIC_DEFAULT_GEARS),
 		judgeTimeoutMs: 15_000,
 		taskRouting: { maxInheritedTurns: 3, downgradeWindow: 2, downgradeMargin: 0.08, minConfidence: 0.8 },
 	};
 }
 
-export function bandForScore(score: number, bias = 0): Band {
+export function bandForScore(score: number, bias = 0, bands: readonly BandSpec[] = DEFAULT_BANDS): Band {
 	const adjusted = clampScore(score + bias * MAX_BIAS_SHIFT);
-	return adjusted < LIGHT_MAX ? 0 : adjusted < STANDARD_MEDIUM_MAX ? 1 : adjusted < STANDARD_MAX ? 2 : adjusted < HEAVY_XHIGH_MIN ? 3 : 4;
+	for (let index = 0; index < bands.length - 1; index++) {
+		if (adjusted < bands[index]!.max!) return index;
+	}
+	return bands.length - 1;
 }
 
-const BAND_TARGETS: readonly { gear: Gear; thinkingLevel: ModelThinkingLevel }[] = [
-	{ gear: "light", thinkingLevel: "low" },
-	{ gear: "standard", thinkingLevel: "medium" },
-	{ gear: "standard", thinkingLevel: "high" },
-	{ gear: "heavy", thinkingLevel: "high" },
-	{ gear: "heavy", thinkingLevel: "xhigh" },
-];
-export function targetForBand(band: Band): { gear: Gear; thinkingLevel: ModelThinkingLevel } {
-	return { ...BAND_TARGETS[band]! };
+export function targetForBand(settings: GearSettings, band: Band): { gear: Gear; thinkingLevel: ModelThinkingLevel } {
+	const spec = settings.bands[band] ?? settings.bands[settings.bands.length - 1]!;
+	return { gear: spec.gear, thinkingLevel: spec.thinkingLevel };
 }
 
 export function gearTarget(settings: GearSettings, gear: Gear): GearTarget {
