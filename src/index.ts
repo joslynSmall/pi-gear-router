@@ -6,17 +6,34 @@ import type {
 	ModelRoute,
 	ModelRouteRequest,
 } from "@earendil-works/pi-coding-agent";
-import { bandForScore, clampScore, gearTarget, targetForBand } from "./gears.ts";
+import { bandForScore, clampScore, gearTarget, targetForBand, resolveRoutingMode } from "./gears.ts";
 import { judgeTask } from "./judge.ts";
+import { buildTaskContext } from "./task-context.ts";
 import { decideTask, policyFingerprint, validTask } from "./task-routing.ts";
-import { branchFacts, clearObservationCoverage, registerObservations } from "./observation.ts";
+import { branchFacts, clearObservationCoverage, registerObservations, recoverObserverBudget } from "./observation.ts";
+import { registerWorkflowGuard } from "./workflow-guard.ts";
+import { registerWorkflowHandoff, WORKFLOW_HANDOFF_TOOL } from "./workflow-handoff.ts";
+import { judgeWorkflowTurn } from "./workflow-judge.ts";
+import { consumeHandoff, newWorkflowState, refreshWorkflowState, steerWorkflow, validWorkflowState, workflowBand, WORKFLOW_EVENT_TYPE } from "./workflow-routing.ts";
 import { loadSettings, SETTINGS_PATH } from "./settings.ts";
-import type { Gear, GearSettings, GearState, GearTarget } from "./types.ts";
+import { createObserverRuntime, runtimeSettings } from "./observer-runtime.ts";
+import { observerDigest, parseObserverState } from "./observer-routing.ts";
+import type { ObserverStateV1 } from "./types.ts";
+import { observerStatus, type ObserverStatusActivity } from "./observer-status.ts";
+import { CAPABILITY_HANDOFF_TOOL } from "./observer-handoff.ts";
+import type { Gear, GearSettings, GearState, GearTarget, JudgeOutcome, WorkflowDiagnostic, WorkflowProfile, WorkflowState, WorkflowTurnOutcome } from "./types.ts";
 
 const PROVIDER = "gears";
 const ID = "auto";
 const FALLBACK_GEAR: Gear = "standard";
 const STATUS_KEY = "pi-gear-router";
+const observerActivity = new WeakMap<object, ObserverStatusActivity>();
+/** Request-local dispatch evidence only; never returned to the routing reducer or persisted. */
+const observerDispatch = new WeakMap<object, { identity: string; pair: GearTarget }>();
+function observerViewState(ctx: ExtensionContext, state: ObserverStateV1): ObserverStateV1 {
+	const live = observerDispatch.get(ctx.sessionManager);
+	return live && live.identity === observerDigest(state.turn) ? { ...state, dispatch: live.pair } : state;
+}
 type GearRequest = ModelRouteRequest<GearState>;
 type PhysicalRoute = Omit<ModelRoute<GearState>, "state">;
 
@@ -93,6 +110,43 @@ function shortReason(text: string): string {
 	return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
+/** Fixed labels only: persisted diagnostic text must never become footer content. */
+function workflowDiagnosticStatus(value: WorkflowDiagnostic | undefined): string {
+	if (!value || value.version !== 1) return "工作流待评估：新请求生效";
+	const labels: Record<WorkflowDiagnostic["reason"], string> = {
+		"low-confidence": "工作流未启动：置信度不足",
+		"classifier-unavailable": "工作流未启动：分类不可用",
+		"invalid-classification": "工作流未启动：分类不完整",
+		"non-text-input": "工作流不适用：非文本输入",
+		review: "工作流不适用：审查请求",
+		question: "工作流不适用：问答请求",
+		"no-phase": "工作流不适用：无需阶段编排",
+		"execution-not-ready": "工作流未启动：直接执行条件不足",
+		"missing-turn": "工作流未启动：缺少回合标识",
+	};
+	const label = Object.hasOwn(labels, value.reason) ? labels[value.reason] : "工作流待评估：新请求生效";
+	if (value.reason === "low-confidence" && typeof value.confidence === "number" && Number.isFinite(value.confidence)
+		&& value.confidence >= 0 && value.confidence <= 1 && typeof value.minConfidence === "number"
+		&& Number.isFinite(value.minConfidence) && value.minConfidence >= .5 && value.minConfidence <= 1) {
+		return `${label}（${value.confidence.toFixed(2)}<${value.minConfidence.toFixed(2)}）`;
+	}
+	return label;
+}
+
+/** Observe the existing routing decision; diagnostics have no routing authority. */
+function workflowNonStart(outcome: WorkflowTurnOutcome | undefined, nonText: boolean, id: string | undefined, minConfidence: number): WorkflowDiagnostic {
+	let reason: WorkflowDiagnostic["reason"];
+	if (nonText) reason = "non-text-input";
+	else if (!id) reason = "missing-turn";
+	else if (!outcome || outcome.kind === "unavailable") reason = "classifier-unavailable";
+	else if (outcome.kind !== "valid" || !outcome.judgment) reason = "invalid-classification";
+	else if (outcome.judgment.confidence < minConfidence) return { version: 1, reason: "low-confidence", confidence: outcome.judgment.confidence, minConfidence };
+	else if (outcome.judgment.objective === "review" || outcome.judgment.objective === "question") reason = outcome.judgment.objective;
+	else if (outcome.judgment.start === "none") reason = "no-phase";
+	else reason = "execution-not-ready";
+	return { version: 1, reason };
+}
+
 function showStatus(ctx: ExtensionContext, state?: GearState, pending = false, trigger?: string): void {
 	if (ctx.mode !== "tui") return;
 	const theme = ctx.ui.theme;
@@ -100,15 +154,33 @@ function showStatus(ctx: ExtensionContext, state?: GearState, pending = false, t
 		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", trigger === "periodic" ? "Jev 评估中…（周期）" : trigger === "downgrade-review" ? "Jev 评估中…（降档复核）" : "Jev 评估中…"));
 		return;
 	}
+	const observer = parseObserverState(state);
+	if (observer) {
+		const mode = resolveRoutingMode(runtimeSettings(ctx));
+		if (mode.mode !== "observer") { ctx.ui.setStatus(STATUS_KEY, undefined); return; }
+		if (ctx.model?.provider !== PROVIDER || ctx.model.id !== ID) { ctx.ui.setStatus(STATUS_KEY, undefined); return; }
+		const budget = recoverObserverBudget(ctx, observer.budget);
+		const view = observerStatus({ ...observerViewState(ctx, observer), budget: budget ?? observer.budget }, ctx.sessionManager.getBranch(), runtimeSettings(ctx),
+			{ ...observerActivity.get(ctx.sessionManager), ...(!budget ? { accountingUnknown: true } : {}) });
+		ctx.ui.setStatus(STATUS_KEY, theme.fg(view.tone, view.text)); return;
+	}
 	if (!state?.dispatch) {
 		ctx.ui.setStatus(STATUS_KEY, undefined);
 		return;
 	}
-	const result = state.decision?.source === "inherited"
-		? `沿用 Jev ${state.score.toFixed(2)} · 续接 ${state.task?.inheritedTurns ?? 0}/${loadSettings(ctx.cwd).taskRouting.maxInheritedTurns}`
-		: state.score >= 0 ? `Jev ${state.score.toFixed(2)}${state.decision?.action === "uncertain" ? " · 关系不明" : state.task?.review || (state.decision?.action === "hold" && (state.decision.requestedBand ?? 0) > bandForScore(state.adjustedScore, 0, loadSettings(ctx.cwd).bands)) ? " · 降档保护" : ""}` : state.decision?.judgeFailure ? `Jev 不可用 · ${shortReason(state.decision.judgeFailure)}` : "Jev 不可用";
+	const settings = runtimeSettings(ctx);
+	const workflow = resolveRoutingMode(settings).mode === "legacy-workflow" ? workflowUsable(state, settings) : undefined;
+	const phase = workflow?.phase;
+	const result = phase
+		? `工作流 ${phase}${workflow?.lastTransition?.reason === "accepted-handoff" ? " · 已接受交接" : workflow?.lastTransition?.reason === "blocked" ? " · 已阻塞" : workflow?.lastTransition?.reason === "budget-exhausted" ? " · 转换预算耗尽" : ""}`
+		: state.decision?.source === "inherited"
+			? `沿用 Jev ${state.score.toFixed(2)} · 续接 ${state.task?.inheritedTurns ?? 0}/${loadSettings(ctx.cwd).taskRouting.maxInheritedTurns}`
+			: state.score >= 0 ? `Jev ${state.score.toFixed(2)}${state.decision?.action === "uncertain" ? " · 关系不明" : state.task?.review || (state.decision?.action === "hold" && (state.decision.requestedBand ?? 0) > bandForScore(state.adjustedScore, 0, loadSettings(ctx.cwd).bands)) ? " · 降档保护" : ""}` : state.decision?.judgeFailure ? `Jev 不可用 · ${shortReason(state.decision.judgeFailure)}` : "Jev 不可用";
 	const fallback = state.fallback ? " fallback" : "";
-	const label = `${result} → ${state.gear}/${state.dispatch.thinkingLevel}${fallback} → ${state.dispatch.provider}/${state.dispatch.model}`;
+	const workflowStatus = !phase && resolveRoutingMode(settings).mode === "legacy-workflow"
+		? ` · ${workflowDiagnosticStatus(state.workflowDiagnostic)}` : "";
+	const modeDiagnostic = resolveRoutingMode(settings).diagnostic;
+	const label = `${result}${workflowStatus}${modeDiagnostic ? ` · ${modeDiagnostic}` : ""} → ${state.gear}/${state.dispatch.thinkingLevel}${fallback} → ${state.dispatch.provider}/${state.dispatch.model}`;
 	ctx.ui.setStatus(STATUS_KEY, theme.fg(state.fallback ? "warning" : "success", label));
 }
 
@@ -122,28 +194,134 @@ function latestState(ctx: ExtensionContext): GearState | undefined {
 	return (entry.data as { state?: GearState }).state;
 }
 
+function workflowEvents(ctx: ExtensionContext): unknown[] {
+	return ctx.sessionManager.getBranch().flatMap(entry => entry.type === "custom" && entry.customType === WORKFLOW_EVENT_TYPE ? [entry.data] : []);
+}
+/** A hand-selected model after this phase's user turn invalidates unconsumed automatic handoffs. */
+function hasManualModelGap(ctx: ExtensionContext, workflow: WorkflowState): boolean {
+	const branch = ctx.sessionManager.getBranch();
+	const index = branch.findLastIndex(entry => entry.type === "message" && entry.message.role === "user"
+		&& workflow.activeTurnId.startsWith(`${entry.id}:`));
+	return index >= 0 && branch.slice(index + 1).some(entry => entry.type === "model_change"
+		&& (entry.provider !== PROVIDER || entry.modelId !== ID));
+}
+/** Status must include append-only lifecycle events written after the last virtual route state. */
+function effectiveState(ctx: ExtensionContext): GearState | undefined {
+	const state = latestState(ctx);
+	if (!state) return;
+	if (parseObserverState(state)) return state;
+	const settings = runtimeSettings(ctx);
+	const workflow = resolveRoutingMode(settings).mode === "legacy-workflow" ? workflowUsable(state, settings) : undefined;
+	if (!workflow) return state;
+	const refreshed = refreshWorkflowState(workflow, workflowEvents(ctx), settings);
+	return refreshed ? { ...state, workflow: refreshed } : state;
+}
+function workflowProfileBand(settings: GearSettings, profile: WorkflowProfile, outcome: WorkflowTurnOutcome, state?: WorkflowState): number {
+	const judgment = outcome.judgment!;
+	return workflowBand(settings, { profile, score: judgment.gear.score, risk: judgment.risk, clarity: judgment.clarity,
+		...(state?.activePacket ? { packet: state.activePacket.packet } : {}) });
+}
+function workflowUsable(state: GearState | undefined, settings: GearSettings): WorkflowState | undefined {
+	return validWorkflowState(state?.workflow, settings.bands.length);
+}
+function taskOutcome(outcome: WorkflowTurnOutcome): JudgeOutcome {
+	return {
+		kind: outcome.kind,
+		...(outcome.judgment ? { judgment: outcome.judgment.gear } : outcome.fallbackJudgment ? { judgment: outcome.fallbackJudgment } : {}),
+		...(outcome.relation ? { relation: outcome.relation } : {}),
+		...(outcome.relationConfidence !== undefined ? { relationConfidence: outcome.relationConfidence } : {}),
+		...(outcome.relationProbability !== undefined ? { relationProbability: outcome.relationProbability } : {}),
+		...(outcome.usageReported !== undefined ? { usageReported: outcome.usageReported } : {}),
+		...(outcome.attempted !== undefined ? { attempted: outcome.attempted } : {}),
+		...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
+	};
+}
+
 /** Adapt capability between user turns; freeze each turn's physical pair, including fallbacks. */
 export default function (pi: ExtensionAPI) {
 	const observationSupported = typeof pi.appendEntry === "function";
 	if (observationSupported) registerObservations(pi);
-	pi.on("session_start", (_event, ctx) => showStatus(ctx, latestState(ctx)));
-	pi.on("session_tree", (_event, ctx) => showStatus(ctx, latestState(ctx)));
+	const observer = createObserverRuntime(pi, {
+		fromTarget,
+		previous: (request, ctx) => previousPair(request as GearRequest, ctx),
+		resolve: (band, request, ctx, settings) => {
+			const target = targetForBand(settings, band);
+			return resolveGear(target.gear, request as GearRequest, ctx, settings, target.thinkingLevel);
+		},
+	}, (ctx, activity) => {
+		observerActivity.set(ctx.sessionManager, activity);
+		if (ctx.mode !== "tui") return;
+		if (resolveRoutingMode(runtimeSettings(ctx)).mode !== "observer" || ctx.model?.provider !== PROVIDER || ctx.model.id !== ID) {
+			ctx.ui.setStatus(STATUS_KEY, undefined); return;
+		}
+		const state = effectiveState(ctx);
+		if (state) showStatus(ctx, state);
+		else if (activity.pending) ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("accent", "路由 Jev 观察中…"));
+	});
+	if (typeof pi.registerTool === "function") registerWorkflowHandoff(pi, (cwd, ctx) => ctx ? runtimeSettings(ctx) : loadSettings(cwd));
+	registerWorkflowGuard(pi, (cwd, ctx) => ctx ? runtimeSettings(ctx) : loadSettings(cwd));
+	pi.on("before_agent_start", (_event, ctx) => {
+		if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
+		const active = pi.getActiveTools();
+		const settings = runtimeSettings(ctx), mode = resolveRoutingMode(settings).mode;
+		const owned = mode === "legacy-workflow" ? WORKFLOW_HANDOFF_TOOL : mode === "observer" && settings.observer.stageAware
+			&& ctx.model?.provider === PROVIDER && ctx.model.id === ID ? CAPABILITY_HANDOFF_TOOL : undefined;
+		const next = [...active.filter(name => name !== WORKFLOW_HANDOFF_TOOL && name !== CAPABILITY_HANDOFF_TOOL), ...(owned ? [owned] : [])];
+		if (next.length !== active.length || next.some((name, index) => name !== active[index])) pi.setActiveTools(next);
+	});
+	if (typeof pi.registerCommand === "function") pi.registerCommand("gear-status", {
+		description: "只读查看能力路由、交接与用量；不触发观察或修改设置",
+		handler: async (_args, ctx) => {
+			// Print/JSON have no UI. RPC notifications are supported, terminal status is not.
+			if (ctx.mode !== "tui" && ctx.mode !== "rpc") return;
+			const settings = runtimeSettings(ctx), mode = resolveRoutingMode(settings), state = effectiveState(ctx), parsed = parseObserverState(state);
+			if (mode.mode === "observer" && parsed && ctx.model?.provider === PROVIDER && ctx.model.id === ID) {
+				const budget = recoverObserverBudget(ctx, parsed.budget);
+				ctx.ui.notify(observerStatus({ ...observerViewState(ctx, parsed), budget: budget ?? parsed.budget }, ctx.sessionManager.getBranch(), settings,
+					{ ...observerActivity.get(ctx.sessionManager), ...(!budget ? { accountingUnknown: true } : {}) }).details, "info");
+			} else {
+				ctx.ui.notify(`路由模式：${mode.mode}${mode.diagnostic ? `（${mode.diagnostic}）` : ""}\n${ctx.model?.provider !== PROVIDER || ctx.model.id !== ID ? "手选物理模型；观察路由未运行。" : mode.mode === "observer" ? "尚无当前观察状态。" : "task／legacy 保留原状态展示，未启用观察交接。"}`, "info");
+			}
+		},
+	});
+	pi.on("input", (_event, ctx) => { observerDispatch.delete(ctx.sessionManager); });
+	pi.on("session_start", (_event, ctx) => { observerDispatch.delete(ctx.sessionManager); observerActivity.delete(ctx.sessionManager); showStatus(ctx, effectiveState(ctx)); });
+	pi.on("session_tree", (_event, ctx) => { observerDispatch.delete(ctx.sessionManager); observerActivity.delete(ctx.sessionManager); showStatus(ctx, effectiveState(ctx)); });
+	pi.on("model_select", (_event, ctx) => { observerDispatch.delete(ctx.sessionManager); observerActivity.delete(ctx.sessionManager); showStatus(ctx, ctx.model?.provider === PROVIDER && ctx.model.id === ID ? effectiveState(ctx) : undefined); });
+	pi.on("message_end", (_event, ctx) => { if (resolveRoutingMode(runtimeSettings(ctx)).mode === "observer") showStatus(ctx, effectiveState(ctx)); });
+	pi.on("tool_result", (_event, ctx) => { if (resolveRoutingMode(runtimeSettings(ctx)).mode === "observer") showStatus(ctx, effectiveState(ctx)); });
 	pi.on("session_shutdown", (_event, ctx) => {
 		clearObservationCoverage(ctx);
+		observerActivity.delete(ctx.sessionManager);
+		observerDispatch.delete(ctx.sessionManager);
 		showStatus(ctx);
 	});
-	pi.registerVirtualModel<GearState>({
+	pi.registerVirtualModel<GearState | ObserverStateV1>({
 		provider: PROVIDER,
 		id: ID,
 		name: "Auto (gears)",
 		thinkingLevels: ["off", "low", "medium", "high", "xhigh", "max"],
 		contextWindow: 1_000_000,
 		maxTokens: 131_072,
-		async route(request: GearRequest, ctx: ExtensionContext): Promise<ModelRoute<GearState>> {
-			request.signal?.throwIfAborted();
-			const settings = loadSettings(ctx.cwd);
+		async route(incoming: ModelRouteRequest<GearState | ObserverStateV1>, ctx: ExtensionContext): Promise<ModelRoute<GearState | ObserverStateV1>> {
+			incoming.signal?.throwIfAborted();
+			const config = runtimeSettings(ctx), mode = resolveRoutingMode(config);
+			if (mode.mode === "observer" && incoming.reason !== "direct") {
+				const result = await observer.route(incoming, ctx);
+				const state = parseObserverState(result.state ?? incoming.state);
+				if (state) observerDispatch.set(ctx.sessionManager, { identity: observerDigest(state.turn)!, pair: { provider: result.model.provider, model: result.model.id, thinkingLevel: result.thinkingLevel } });
+				showStatus(ctx, (result.state ?? incoming.state) as GearState | undefined); return result;
+			}
+			// Preserve only a proven dispatch across mode changes, never reinterpret observer task/profile.
+			const observerState = parseObserverState(incoming.state);
+			if (mode.mode !== "observer") { observer.invalidate(ctx, "mode-changed"); observerDispatch.delete(ctx.sessionManager); }
+			const compatible = observerState ? { gear: FALLBACK_GEAR, score: -1, adjustedScore: -1, confidence: 0, inputTokens: 0, fallback: false,
+				dispatch: observerState.dispatch, turnId: `${observerState.turn.userEntryId}:${observerState.turn.userContentDigest}` } satisfies GearState : undefined;
+			const request = { ...incoming, state: observerState ? compatible : incoming.state } as GearRequest;
+			const settings = { ...config, enabled: mode.mode !== "disabled", workflow: { ...config.workflow, enabled: mode.mode === "legacy-workflow" } };
 			const old = request.state;
 			if (request.reason === "direct") {
+				if (mode.mode === "observer") { observerDispatch.delete(ctx.sessionManager); showStatus(ctx); }
 				const pair = !settings.enabled ? previousPair(request, ctx)
 					?? resolveGear(FALLBACK_GEAR, request, ctx, settings)
 					: resolveGear("light", request, ctx, settings);
@@ -171,8 +349,42 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			const priorWorkflow = settings.workflow.enabled ? workflowUsable(old, settings) : undefined;
+			if (request.reason === "continuation" && old && priorWorkflow) {
+				const events = workflowEvents(ctx);
+				const refreshed = refreshWorkflowState(priorWorkflow, events, settings);
+				const handoff = refreshed && !hasManualModelGap(ctx, refreshed) ? consumeHandoff(refreshed, events, settings) : undefined;
+				const nextWorkflow = handoff?.state ?? refreshed;
+				if (nextWorkflow && handoff) {
+					const activeProfile = nextWorkflow.activeProfile;
+					const selected = activeProfile
+						? resolveGear(targetForBand(settings, handoff.requestedBand).gear, request, ctx, settings, targetForBand(settings, handoff.requestedBand).thinkingLevel)
+						: (() => {
+							const sticky = stickyPair(request, ctx);
+							return sticky ? { ...sticky, gear: old.gear, degraded: !!old.fallback } : resolveGear(old.gear, request, ctx, settings, old.dispatch?.thinkingLevel);
+						})();
+					const state: GearState = {
+						...old, gear: selected.gear, dispatch: dispatch(selected), workflow: nextWorkflow,
+						fallback: selected.degraded,
+						...(selected.degraded ? { fallbackReason: "target-unavailable" as const } : {}),
+					};
+					request.signal?.throwIfAborted();
+					showStatus(ctx, state);
+					return { model: selected.model, thinkingLevel: selected.thinkingLevel, state };
+				}
+				if (nextWorkflow && JSON.stringify(nextWorkflow) !== JSON.stringify(priorWorkflow)) {
+					const sticky = stickyPair(request, ctx);
+					if (sticky) {
+						const state: GearState = { ...old, workflow: nextWorkflow, gear: old.gear, dispatch: dispatch(sticky) };
+						request.signal?.throwIfAborted();
+						showStatus(ctx, state);
+						return { model: sticky.model, thinkingLevel: sticky.thinkingLevel, state };
+					}
+				}
+			}
+
 			if (request.reason !== "user") {
-				// Preserve the actual dispatched pair, even if gear settings changed mid-turn.
+				// Ordinary continuations and every retry preserve the actual dispatched pair.
 				const sticky = stickyPair(request, ctx);
 				if (sticky) {
 					request.signal?.throwIfAborted();
@@ -202,18 +414,26 @@ export default function (pi: ExtensionAPI) {
 				return { model: replacement.model, thinkingLevel: replacement.thinkingLevel, state };
 			}
 
-			// Only new user turns reach task adaptation; within-turn routing above remains sticky.
+			// Only a real user turn can establish, steer, replace, or leave a workflow.
 			const saved = savedPair(old, ctx);
+			const fingerprint = policyFingerprint(settings);
+			let workflowOutcome: WorkflowTurnOutcome | undefined;
+			const task = validTask(old?.task, settings.bands.length);
+			const facts = branchFacts(ctx, task, request.messages, observationSupported);
+			const currentHasNonTextInput = buildTaskContext(request.messages, task, facts).nonTextInput;
 			let decision;
 			try {
 				decision = await decideTask({
 					...(id ? { turnId: id } : {}), messages: request.messages, ...(old ? { previous: old } : {}), settings,
-					policyFingerprint: policyFingerprint(settings),
-					facts: branchFacts(ctx, validTask(old?.task, settings.bands.length), request.messages, observationSupported),
+					policyFingerprint: fingerprint,
+					facts,
 					savedDispatchUsable: !!saved && saved.thinkingLevel === old?.dispatch?.thinkingLevel,
-				}, (context, signal, trigger) => {
+					...(settings.workflow.enabled ? { forceRejudge: true } : {}),
+				}, async (context, signal, trigger) => {
 					showStatus(ctx, undefined, true, trigger);
-					return judgeTask(ctx, context, settings.judgeTimeoutMs, signal);
+					if (!settings.workflow.enabled) return judgeTask(ctx, context, settings.judgeTimeoutMs, signal);
+					workflowOutcome = await judgeWorkflowTurn(ctx, context, settings.judgeTimeoutMs, signal);
+					return taskOutcome(workflowOutcome);
 				}, request.signal);
 				request.signal?.throwIfAborted();
 			} catch (error) {
@@ -221,10 +441,48 @@ export default function (pi: ExtensionAPI) {
 				throw error;
 			}
 			const judgment = decision.judgment;
-			const desired = decision.requestedBand !== undefined ? targetForBand(settings, decision.requestedBand) : undefined;
+			let workflow: WorkflowState | undefined;
+			let workflowRequestedBand: number | undefined;
+			const outcome = workflowOutcome;
+			const workflowTrusted = !!outcome?.judgment && outcome.kind === "valid"
+				&& outcome.judgment.confidence >= settings.workflow.handoffMinConfidence;
+			if (settings.workflow.enabled && id && workflowTrusted && !currentHasNonTextInput) {
+				const turn = outcome.judgment!;
+				const prior = priorWorkflow && refreshWorkflowState(priorWorkflow, workflowEvents(ctx), settings);
+				const sameWorkflow = prior && prior.objective === "deliver" && prior.phase !== "complete" && prior.phase !== "blocked"
+					&& turn.objective === "deliver" && outcome.relation === "same_task"
+					// A new planning request supersedes execution/verification rather than inheriting an old packet.
+					&& (turn.start !== "planning" || prior.phase === "planning" || prior.phase === "recovery")
+					&& (outcome.relationConfidence ?? 0) >= settings.taskRouting.minConfidence
+					&& (outcome.relationProbability ?? 0) >= settings.taskRouting.minConfidence;
+				if (sameWorkflow && prior.activeProfile) {
+					workflow = steerWorkflow(prior, id);
+					if (workflow) {
+						workflow.policyFingerprint = fingerprint;
+						workflowRequestedBand = workflowProfileBand(settings, workflow.activeProfile!, outcome, workflow);
+					}
+				} else if ((turn.objective === "deliver" && (turn.start === "planning" || (turn.start === "execution" && turn.clarity === "high" && turn.risk === "low")))
+					|| ((turn.objective === "plan_only" || turn.objective === "research_only") && turn.start === "planning")) {
+					const phase = turn.objective === "deliver" && turn.start === "execution" ? "execution" : "planning";
+					workflowRequestedBand = workflowProfileBand(settings, phase, outcome);
+					workflow = newWorkflowState({
+						workflowId: `workflow:${createHash("sha256").update(id).digest("hex")}`,
+						initialTurnId: id,
+						objective: turn.objective,
+						phase,
+						policyFingerprint: fingerprint,
+						requestedBand: workflowRequestedBand,
+					});
+					if (prior) workflow.lastTransition = { from: prior.phase, to: phase, reason: "user-superseded", requestedBand: workflowRequestedBand };
+				}
+			}
+			const workflowDiagnostic = settings.workflow.enabled && !workflow
+				? workflowNonStart(outcome, currentHasNonTextInput, id, settings.workflow.handoffMinConfidence) : undefined;
+			const requestedBand = workflowRequestedBand ?? decision.requestedBand;
+			const desired = requestedBand !== undefined ? targetForBand(settings, requestedBand) : undefined;
 			const wanted = desired?.gear ?? old?.gear ?? FALLBACK_GEAR;
 			const thinkingLevel = desired?.thinkingLevel ?? old?.dispatch?.thinkingLevel;
-			const retained = decision.retainSavedDispatch && old ? saved ?? previousPair(request, ctx) : undefined;
+			const retained = !workflow && decision.retainSavedDispatch && old ? saved ?? previousPair(request, ctx) : undefined;
 			const resolved = retained && old ? { ...retained, gear: old.gear, degraded: !!old.fallback && !!judgment }
 				: resolveGear(wanted, request, ctx, settings, thinkingLevel);
 			const fallback = (decision.trace.source !== "inherited" && !judgment) || resolved.degraded;
@@ -235,7 +493,9 @@ export default function (pi: ExtensionAPI) {
 				confidence: decision.trace.source === "inherited" ? old?.confidence ?? 0 : judgment?.confidence ?? 0,
 				inputTokens: judgment?.inputTokens ?? 0,
 				...(decision.task ? { task: decision.task } : {}),
-				decision: decision.trace,
+				...(workflow ? { workflow } : {}),
+				...(workflowDiagnostic ? { workflowDiagnostic } : {}),
+				decision: { ...decision.trace, ...(workflowRequestedBand !== undefined ? { requestedBand: workflowRequestedBand } : {}) },
 				fallback,
 				...(fallback ? { fallbackReason: judgment ? "target-unavailable" as const : "judge-unavailable" as const } : {}),
 				dispatch: dispatch(resolved),

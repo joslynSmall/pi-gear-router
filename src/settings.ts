@@ -71,16 +71,23 @@ function readJson(path: string): unknown {
  *
  * Passing `cwd` layers the project file `.pi/pi-gear-router/settings.json` over the user file:
  * fields it sets win, everything else inherits the user value, and an invalid project field
- * falls back to the user value rather than the built-in default.
+ * falls back to the user value rather than the built-in default. Exceptions: an invalid
+ * explicit mode disables observer opt-in; when observer is selected/requested, project
+ * overrides require `projectTrusted:true`. Missing trust capability is not consent.
  */
-export function loadSettings(cwd?: string): GearSettings {
+export function loadSettings(cwd?: string, options: { projectTrusted?: boolean } = {}): GearSettings {
 	const agentSignature = fileSignature(SETTINGS_PATH);
 	const projectPath = cwd ? projectSettingsPath(cwd) : undefined;
 	const projectSignature = projectPath ? fileSignature(projectPath) : undefined;
-	const signature = `${agentSignature ?? "none"}|${projectPath ?? ""}|${projectSignature ?? "none"}`;
+	const signature = `${agentSignature ?? "none"}|${projectPath ?? ""}|${projectSignature ?? "none"}|${options.projectTrusted === true}`;
 	if (cache?.signature === signature) return cloneSettings(cache.settings);
 	const user = agentSignature ? parseSettings(readJson(SETTINGS_PATH), defaultSettings()) : defaultSettings();
-	const settings = projectSignature && projectPath ? parseSettings(readJson(projectPath), user) : user;
+	const project = projectSignature && projectPath ? readJson(projectPath) : undefined;
+	const projectRecord = typeof project === "object" && project !== null && !Array.isArray(project) ? project as Record<string, unknown> : {};
+	// Protect all project router fields when observer is selected or requested; do not
+	// alter the existing task/legacy overlay contract when observer is not involved.
+	const observerScope = user.routingMode === "observer" || projectRecord.routingMode === "observer";
+	const settings = observerScope && options.projectTrusted !== true ? user : parseSettings(project, user);
 	cache = { signature, settings };
 	return cloneSettings(settings);
 }
@@ -105,10 +112,47 @@ function parseSettings(raw: unknown, fallback: GearSettings): GearSettings {
 		bands: readBands(file.bands, fallback.bands),
 		gears,
 		taskRouting: readPolicy(file.taskRouting, fallback.taskRouting),
+		workflow: readWorkflow(file.workflow, fallback.workflow, readBands(file.bands, fallback.bands).length),
+		...readMode(file, fallback),
+		observer: readObserver(file.observer, fallback.observer),
 		judgeTimeoutMs:
 			typeof file.judgeTimeoutMs === "number" && Number.isFinite(file.judgeTimeoutMs) && file.judgeTimeoutMs > 0
 				? file.judgeTimeoutMs
 				: fallback.judgeTimeoutMs,
+	};
+}
+
+function readMode(file: Record<string, unknown>, fallback: GearSettings): Pick<GearSettings, "routingMode" | "routingModeInvalid"> {
+	if (!Object.hasOwn(file, "routingMode")) return {
+		...(fallback.routingMode !== undefined ? { routingMode: fallback.routingMode } : {}),
+		...(fallback.routingModeInvalid ? { routingModeInvalid: true } : {}),
+	};
+	const mode = file.routingMode;
+	if (mode === "observer" || mode === "task" || mode === "legacy-workflow") return { routingMode: mode };
+	return { routingModeInvalid: true };
+}
+
+function readObserver(value: unknown, fallback: GearSettings["observer"]): GearSettings["observer"] {
+	const raw = (v: unknown): Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
+	const r = raw(value), g = raw(r.guidance), skills = raw(r.skills), floors = raw(r.minBands);
+	const flag = (v: unknown, f: boolean) => typeof v === "boolean" ? v : f;
+	const integer = (v: unknown, f: number, min: number, max: number) => typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= max ? v : f;
+	return {
+		guidance: { enabled: flag(g.enabled, fallback.guidance.enabled),
+			maxCandidates: integer(g.maxCandidates, fallback.guidance.maxCandidates, 0, 2),
+			maxChars: integer(g.maxChars, fallback.guidance.maxChars, 1, 800),
+			maxPerTask: integer(g.maxPerTask, fallback.guidance.maxPerTask, 0, 12) },
+		skills: { enabled: flag(skills.enabled, fallback.skills.enabled) },
+		stageAware: flag(r.stageAware, fallback.stageAware),
+		minBands: {
+			converge: integer(floors.converge, fallback.minBands.converge, 0, Number.MAX_SAFE_INTEGER),
+			implement: integer(floors.implement, fallback.minBands.implement, 0, Number.MAX_SAFE_INTEGER),
+			verify: integer(floors.verify, fallback.minBands.verify, 0, Number.MAX_SAFE_INTEGER),
+			respond: integer(floors.respond, fallback.minBands.respond, 0, Number.MAX_SAFE_INTEGER),
+		},
+		maxCallsPerTask: integer(r.maxCallsPerTask, fallback.maxCallsPerTask, 1, 64),
+		maxTransitions: integer(r.maxTransitions, fallback.maxTransitions, 1, 8),
+		maxTransportRetries: integer(r.maxTransportRetries, fallback.maxTransportRetries, 0, 1) as 0 | 1,
 	};
 }
 
@@ -123,6 +167,28 @@ function readPolicy(value: unknown, fallback: GearSettings["taskRouting"]): Gear
 		downgradeWindow: read("downgradeWindow", 2, 8, true),
 		downgradeMargin: read("downgradeMargin", 0, 0.15),
 		minConfidence: read("minConfidence", 0.5, 1),
+	};
+}
+
+function readWorkflow(value: unknown, fallback: GearSettings["workflow"], bandCount: number): GearSettings["workflow"] {
+	const raw = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+	const band = (key: keyof Pick<GearSettings["workflow"], "planningMinBand" | "executionMinBand" | "atomicExecutionMinBand" | "verificationMinBand" | "recoveryMinBand">) => {
+		const n = raw[key];
+		return typeof n === "number" && Number.isInteger(n) && n >= 0 && n < bandCount ? n : Math.min(fallback[key], bandCount - 1);
+	};
+	const confidence = raw.handoffMinConfidence;
+	const transitions = raw.maxTransitions;
+	const reminders = raw.maxReminderContinuations;
+	return {
+		enabled: typeof raw.enabled === "boolean" ? raw.enabled : fallback.enabled,
+		planningMinBand: band("planningMinBand"),
+		executionMinBand: band("executionMinBand"),
+		atomicExecutionMinBand: band("atomicExecutionMinBand"),
+		verificationMinBand: band("verificationMinBand"),
+		recoveryMinBand: band("recoveryMinBand"),
+		handoffMinConfidence: typeof confidence === "number" && Number.isFinite(confidence) && confidence >= .5 && confidence <= 1 ? confidence : fallback.handoffMinConfidence,
+		maxTransitions: typeof transitions === "number" && Number.isInteger(transitions) && transitions >= 1 && transitions <= 8 ? transitions : fallback.maxTransitions,
+		maxReminderContinuations: reminders === 0 || reminders === 1 ? reminders : fallback.maxReminderContinuations,
 	};
 }
 

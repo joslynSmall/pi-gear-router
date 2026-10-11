@@ -39,7 +39,52 @@ export function defaultSettings(): GearSettings {
 		gears: structuredClone(GENERIC_DEFAULT_GEARS),
 		judgeTimeoutMs: 15_000,
 		taskRouting: { maxInheritedTurns: 3, downgradeWindow: 2, downgradeMargin: 0.08, minConfidence: 0.8 },
+		observer: {
+			guidance: { enabled: true, maxCandidates: 2, maxChars: 800, maxPerTask: 6 },
+			skills: { enabled: true }, stageAware: true,
+			minBands: { converge: 3, implement: 1, verify: 1, respond: 0 },
+			maxCallsPerTask: 24, maxTransitions: 4, maxTransportRetries: 0,
+		},
+		workflow: {
+			enabled: false,
+			planningMinBand: 3,
+			executionMinBand: 1,
+			atomicExecutionMinBand: 0,
+			verificationMinBand: 1,
+			recoveryMinBand: 3,
+			handoffMinConfidence: 0.8,
+			maxTransitions: 6,
+			maxReminderContinuations: 1,
+		},
 	};
+}
+
+/** Single mode resolver; runtime consumers are migrated together at task 6.2. */
+export function resolveRoutingMode(settings: Pick<GearSettings, "enabled" | "workflow" | "routingMode" | "routingModeInvalid">): {
+	mode: "disabled" | "task" | "legacy-workflow" | "observer";
+	diagnostic?: "invalid-mode" | "mode-conflict";
+} {
+	if (!settings.enabled) return { mode: "disabled" };
+	const mode = settings.routingMode;
+	const legacy = settings.workflow.enabled;
+	if (settings.routingModeInvalid || (mode !== undefined && !["task", "legacy-workflow", "observer"].includes(mode))) {
+		return { mode: legacy ? "legacy-workflow" : "task", diagnostic: "invalid-mode" };
+	}
+	if (legacy && (mode === "observer" || mode === "task")) return { mode: "legacy-workflow", diagnostic: "mode-conflict" };
+	return { mode: mode ?? (legacy ? "legacy-workflow" : "task") };
+}
+
+/** Out-of-table floors protect with the highest available band, never the cheapest. */
+export function resolveObserverPolicy(settings: GearSettings) {
+	const observer = structuredClone(settings.observer);
+	const clampedFloors: (keyof typeof observer.minBands)[] = [];
+	for (const profile of Object.keys(observer.minBands) as (keyof typeof observer.minBands)[]) {
+		if (observer.minBands[profile] >= settings.bands.length) {
+			observer.minBands[profile] = settings.bands.length - 1;
+			clampedFloors.push(profile);
+		}
+	}
+	return { ...observer, clampedFloors };
 }
 
 export function bandForScore(score: number, bias = 0, bands: readonly BandSpec[] = DEFAULT_BANDS): Band {

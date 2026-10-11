@@ -1,0 +1,1959 @@
+{
+  "version": 1,
+  "startedAt": "2026-10-11T02:52:37.673Z",
+  "plan": {
+    "syntheticOnly": true,
+    "classifier": "typesafe/jev-latest",
+    "classifierCalls": 6,
+    "classifierAttempts": 6,
+    "chatCalls": 4,
+    "chatMaxOutputTokens": 2000,
+    "classifierDeadlineMs": 15000,
+    "chatDeadlineMs": 45000,
+    "totalDeadlineMs": 150000,
+    "transportRetries": 0,
+    "fixtures": [
+      "runtime investigation with capability handoff",
+      "same-task explanation",
+      "alternate directory",
+      "no Skills",
+      "large directory/12 candidate maximum schema"
+    ],
+    "probabilityTolerance": 0.001,
+    "report": "docs/observer-guided-routing-visible-smoke.json",
+    "visibleCatalog": true,
+    "expected": {
+      "runtimeWork": "investigate",
+      "relevantSkillIndex": 0,
+      "irrelevantSkillIndices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "handoff": "one explicit capability candidate; no approval or business completion"
+    }
+  },
+  "classifier": [
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 1173,
+      "stopReason": "stop",
+      "questions": [
+        "messageEffect",
+        "work",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability",
+        "clarification",
+        "skill_0",
+        "skill_1",
+        "skill_2",
+        "skill_3",
+        "skill_4",
+        "skill_5",
+        "skill_6",
+        "skill_7",
+        "skill_8",
+        "skill_9",
+        "skill_10",
+        "skill_11"
+      ],
+      "answers": {
+        "messageEffect": {
+          "type": "choice",
+          "choice": "request_work",
+          "probabilities": {
+            "request_work": 0.95,
+            "continue": 0.01,
+            "explain": 0.04,
+            "change_scope": 0,
+            "pause": 0,
+            "cancel": 0,
+            "clarify_reference": 0
+          },
+          "confidence": 0.94
+        },
+        "work": {
+          "type": "choice",
+          "choice": "investigate",
+          "probabilities": {
+            "investigate": 0.94,
+            "requirements": 0,
+            "design": 0.01,
+            "task_plan": 0.01,
+            "implement": 0.02,
+            "verify": 0,
+            "diagnose": 0,
+            "answer": 0.02,
+            "unknown": 0
+          },
+          "confidence": 0.93
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "clear",
+          "probabilities": {
+            "clear": 0.83,
+            "unresolved": 0.14,
+            "unknown": 0.03
+          },
+          "confidence": 0.74
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.99,
+            "medium": 0.01,
+            "high": 0,
+            "unknown": 0
+          },
+          "confidence": 0.99
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0,
+            "none_observed": 1,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.9,
+          "confidence": 0.73
+        },
+        "clarification": {
+          "type": "bool",
+          "probability": 0.21
+        },
+        "skill_0": {
+          "type": "bool",
+          "probability": 0.93
+        },
+        "skill_1": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_2": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_3": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_4": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_5": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_6": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_7": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_8": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_9": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_10": {
+          "type": "bool",
+          "probability": 0.04
+        },
+        "skill_11": {
+          "type": "bool",
+          "probability": 0.05
+        }
+      },
+      "validatedFields": {
+        "messageEffect": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "request_work",
+          "confidence": 0.94,
+          "probabilities": {
+            "request_work": 0.95,
+            "continue": 0.01,
+            "explain": 0.04,
+            "change_scope": 0,
+            "pause": 0,
+            "cancel": 0,
+            "clarify_reference": 0
+          }
+        },
+        "work": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "investigate",
+          "confidence": 0.93,
+          "probabilities": {
+            "investigate": 0.94,
+            "requirements": 0,
+            "design": 0.01,
+            "task_plan": 0.01,
+            "implement": 0.02,
+            "verify": 0,
+            "diagnose": 0,
+            "answer": 0.02,
+            "unknown": 0
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "clear",
+          "confidence": 0.74,
+          "probabilities": {
+            "clear": 0.83,
+            "unresolved": 0.14,
+            "unknown": 0.03
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.99,
+          "probabilities": {
+            "low": 0.99,
+            "medium": 0.01,
+            "high": 0,
+            "unknown": 0
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 1,
+          "probabilities": {
+            "waiting": 0,
+            "none_observed": 1,
+            "unknown": 0
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.9,
+          "confidence": 0.73
+        },
+        "clarification": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.21
+        },
+        "skill_0": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.93
+        },
+        "skill_1": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_2": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_3": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_4": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_5": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_6": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_7": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_8": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_9": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_10": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.04
+        },
+        "skill_11": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        }
+      },
+      "usage": {
+        "input": 3428,
+        "output": 538,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 3966,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 910,
+      "stopReason": "stop",
+      "questions": [
+        "readiness",
+        "scope",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability"
+      ],
+      "answers": {
+        "readiness": {
+          "type": "choice",
+          "choice": "ready",
+          "probabilities": {
+            "ready": 0.99,
+            "needs_convergence": 0.01,
+            "blocked": 0
+          },
+          "confidence": 0.98
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "relevant",
+          "probabilities": {
+            "relevant": 1,
+            "unrelated": 0,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "clear",
+          "probabilities": {
+            "clear": 1,
+            "unresolved": 0,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.95,
+            "medium": 0.05,
+            "high": 0,
+            "unknown": 0
+          },
+          "confidence": 0.93
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0,
+            "none_observed": 1,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.6,
+          "confidence": 0.37
+        }
+      },
+      "validatedFields": {
+        "readiness": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "ready",
+          "confidence": 0.98,
+          "probabilities": {
+            "ready": 0.99,
+            "needs_convergence": 0.01,
+            "blocked": 0
+          }
+        },
+        "scope": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "relevant",
+          "confidence": 1,
+          "probabilities": {
+            "relevant": 1,
+            "unrelated": 0,
+            "unknown": 0
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "clear",
+          "confidence": 1,
+          "probabilities": {
+            "clear": 1,
+            "unresolved": 0,
+            "unknown": 0
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.93,
+          "probabilities": {
+            "low": 0.95,
+            "medium": 0.05,
+            "high": 0,
+            "unknown": 0
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 1,
+          "probabilities": {
+            "waiting": 0,
+            "none_observed": 1,
+            "unknown": 0
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.6,
+          "confidence": 0.37
+        }
+      },
+      "usage": {
+        "input": 1874,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 2098,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 496,
+      "stopReason": "stop",
+      "questions": [
+        "relation",
+        "messageEffect",
+        "work",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability",
+        "clarification",
+        "skill_0",
+        "skill_1",
+        "skill_2",
+        "skill_3",
+        "skill_4",
+        "skill_5",
+        "skill_6",
+        "skill_7",
+        "skill_8",
+        "skill_9",
+        "skill_10",
+        "skill_11"
+      ],
+      "answers": {
+        "relation": {
+          "type": "choice",
+          "choice": "same_task",
+          "probabilities": {
+            "same_task": 0.97,
+            "new_task": 0.03,
+            "uncertain": 0
+          },
+          "confidence": 0.95
+        },
+        "messageEffect": {
+          "type": "choice",
+          "choice": "explain",
+          "probabilities": {
+            "request_work": 0,
+            "continue": 0,
+            "explain": 1,
+            "change_scope": 0,
+            "pause": 0,
+            "cancel": 0,
+            "clarify_reference": 0
+          },
+          "confidence": 1
+        },
+        "work": {
+          "type": "choice",
+          "choice": "answer",
+          "probabilities": {
+            "investigate": 0,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0,
+            "diagnose": 0,
+            "answer": 1,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "clear",
+          "probabilities": {
+            "clear": 0.94,
+            "unresolved": 0.05,
+            "unknown": 0.01
+          },
+          "confidence": 0.91
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.99,
+            "medium": 0.01,
+            "high": 0,
+            "unknown": 0
+          },
+          "confidence": 0.99
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0.06,
+            "none_observed": 0.93,
+            "unknown": 0.01
+          },
+          "confidence": 0.89
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.06,
+          "confidence": 0.9
+        },
+        "clarification": {
+          "type": "bool",
+          "probability": 0.18
+        },
+        "skill_0": {
+          "type": "bool",
+          "probability": 0.9
+        },
+        "skill_1": {
+          "type": "bool",
+          "probability": 0.08
+        },
+        "skill_2": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_3": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_4": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_5": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_6": {
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_7": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_8": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_9": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_10": {
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_11": {
+          "type": "bool",
+          "probability": 0.06
+        }
+      },
+      "validatedFields": {
+        "relation": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "same_task",
+          "confidence": 0.95,
+          "probabilities": {
+            "same_task": 0.97,
+            "new_task": 0.03,
+            "uncertain": 0
+          }
+        },
+        "messageEffect": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "explain",
+          "confidence": 1,
+          "probabilities": {
+            "request_work": 0,
+            "continue": 0,
+            "explain": 1,
+            "change_scope": 0,
+            "pause": 0,
+            "cancel": 0,
+            "clarify_reference": 0
+          }
+        },
+        "work": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "answer",
+          "confidence": 1,
+          "probabilities": {
+            "investigate": 0,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0,
+            "diagnose": 0,
+            "answer": 1,
+            "unknown": 0
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "clear",
+          "confidence": 0.91,
+          "probabilities": {
+            "clear": 0.94,
+            "unresolved": 0.05,
+            "unknown": 0.01
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.99,
+          "probabilities": {
+            "low": 0.99,
+            "medium": 0.01,
+            "high": 0,
+            "unknown": 0
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 0.89,
+          "probabilities": {
+            "waiting": 0.06,
+            "none_observed": 0.93,
+            "unknown": 0.01
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.06,
+          "confidence": 0.9
+        },
+        "clarification": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.18
+        },
+        "skill_0": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.9
+        },
+        "skill_1": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.08
+        },
+        "skill_2": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_3": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_4": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_5": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_6": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        },
+        "skill_7": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_8": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_9": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_10": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        },
+        "skill_11": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.06
+        }
+      },
+      "usage": {
+        "input": 3895,
+        "output": 575,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 4470,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 883,
+      "stopReason": "stop",
+      "questions": [
+        "relation",
+        "messageEffect",
+        "work",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability",
+        "clarification",
+        "skill_0",
+        "skill_1"
+      ],
+      "answers": {
+        "relation": {
+          "type": "choice",
+          "choice": "same_task",
+          "probabilities": {
+            "same_task": 0.64,
+            "new_task": 0.3,
+            "uncertain": 0.06
+          },
+          "confidence": 0.46
+        },
+        "messageEffect": {
+          "type": "choice",
+          "choice": "request_work",
+          "probabilities": {
+            "request_work": 0.93,
+            "continue": 0,
+            "explain": 0.03,
+            "change_scope": 0.02,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.01
+          },
+          "confidence": 0.92
+        },
+        "work": {
+          "type": "choice",
+          "choice": "investigate",
+          "probabilities": {
+            "investigate": 0.99,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.01,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0
+          },
+          "confidence": 0.99
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "unresolved",
+          "probabilities": {
+            "clear": 0.28,
+            "unresolved": 0.53,
+            "unknown": 0.19
+          },
+          "confidence": 0.3
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.93,
+            "medium": 0.06,
+            "high": 0,
+            "unknown": 0.01
+          },
+          "confidence": 0.91
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.91,
+            "unknown": 0.08
+          },
+          "confidence": 0.86
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.83,
+          "confidence": 0.56
+        },
+        "clarification": {
+          "type": "bool",
+          "probability": 0.49
+        },
+        "skill_0": {
+          "type": "bool",
+          "probability": 0.96
+        },
+        "skill_1": {
+          "type": "bool",
+          "probability": 0.05
+        }
+      },
+      "validatedFields": {
+        "relation": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "same_task",
+          "confidence": 0.46,
+          "probabilities": {
+            "same_task": 0.64,
+            "new_task": 0.3,
+            "uncertain": 0.06
+          }
+        },
+        "messageEffect": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "request_work",
+          "confidence": 0.92,
+          "probabilities": {
+            "request_work": 0.93,
+            "continue": 0,
+            "explain": 0.03,
+            "change_scope": 0.02,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.01
+          }
+        },
+        "work": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "investigate",
+          "confidence": 0.99,
+          "probabilities": {
+            "investigate": 0.99,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.01,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "unresolved",
+          "confidence": 0.3,
+          "probabilities": {
+            "clear": 0.28,
+            "unresolved": 0.53,
+            "unknown": 0.19
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.91,
+          "probabilities": {
+            "low": 0.93,
+            "medium": 0.06,
+            "high": 0,
+            "unknown": 0.01
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 0.86,
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.91,
+            "unknown": 0.08
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.83,
+          "confidence": 0.56
+        },
+        "clarification": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.49
+        },
+        "skill_0": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.96
+        },
+        "skill_1": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.05
+        }
+      },
+      "usage": {
+        "input": 1886,
+        "output": 399,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 2285,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 254,
+      "stopReason": "stop",
+      "questions": [
+        "relation",
+        "messageEffect",
+        "work",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability",
+        "clarification"
+      ],
+      "answers": {
+        "relation": {
+          "type": "choice",
+          "choice": "new_task",
+          "probabilities": {
+            "same_task": 0.27,
+            "new_task": 0.54,
+            "uncertain": 0.19
+          },
+          "confidence": 0.31
+        },
+        "messageEffect": {
+          "type": "choice",
+          "choice": "request_work",
+          "probabilities": {
+            "request_work": 0.89,
+            "continue": 0,
+            "explain": 0.060000000000000005,
+            "change_scope": 0.02,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.02
+          },
+          "confidence": 0.87
+        },
+        "work": {
+          "type": "choice",
+          "choice": "investigate",
+          "probabilities": {
+            "investigate": 0.9299999999999999,
+            "requirements": 0,
+            "design": 0.01,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.04,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0.02
+          },
+          "confidence": 0.92
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "unresolved",
+          "probabilities": {
+            "clear": 0.12,
+            "unresolved": 0.44,
+            "unknown": 0.44
+          },
+          "confidence": 0.16
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.91,
+            "medium": 0.05,
+            "high": 0,
+            "unknown": 0.04
+          },
+          "confidence": 0.88
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.84,
+            "unknown": 0.15
+          },
+          "confidence": 0.76
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.84,
+          "confidence": 0.55
+        },
+        "clarification": {
+          "type": "bool",
+          "probability": 0.64
+        }
+      },
+      "validatedFields": {
+        "relation": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "new_task",
+          "confidence": 0.31,
+          "probabilities": {
+            "same_task": 0.27,
+            "new_task": 0.54,
+            "uncertain": 0.19
+          }
+        },
+        "messageEffect": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "request_work",
+          "confidence": 0.87,
+          "probabilities": {
+            "request_work": 0.89,
+            "continue": 0,
+            "explain": 0.060000000000000005,
+            "change_scope": 0.02,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.02
+          }
+        },
+        "work": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "investigate",
+          "confidence": 0.92,
+          "probabilities": {
+            "investigate": 0.9299999999999999,
+            "requirements": 0,
+            "design": 0.01,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.04,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0.02
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "unresolved",
+          "confidence": 0.16,
+          "probabilities": {
+            "clear": 0.12,
+            "unresolved": 0.44,
+            "unknown": 0.44
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.88,
+          "probabilities": {
+            "low": 0.91,
+            "medium": 0.05,
+            "high": 0,
+            "unknown": 0.04
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 0.76,
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.84,
+            "unknown": 0.15
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.84,
+          "confidence": 0.55
+        },
+        "clarification": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.64
+        }
+      },
+      "usage": {
+        "input": 1582,
+        "output": 363,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 1945,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "model": "typesafe/jev-latest",
+      "elapsedMs": 313,
+      "stopReason": "stop",
+      "questions": [
+        "relation",
+        "messageEffect",
+        "work",
+        "clarity",
+        "risk",
+        "methodGate",
+        "capability",
+        "clarification",
+        "skill_0",
+        "skill_1",
+        "skill_2",
+        "skill_3",
+        "skill_4",
+        "skill_5",
+        "skill_6",
+        "skill_7",
+        "skill_8",
+        "skill_9",
+        "skill_10",
+        "skill_11"
+      ],
+      "answers": {
+        "relation": {
+          "type": "choice",
+          "choice": "same_task",
+          "probabilities": {
+            "same_task": 0.75,
+            "new_task": 0.2,
+            "uncertain": 0.05
+          },
+          "confidence": 0.62
+        },
+        "messageEffect": {
+          "type": "choice",
+          "choice": "request_work",
+          "probabilities": {
+            "request_work": 0.92,
+            "continue": 0.01,
+            "explain": 0.04,
+            "change_scope": 0.01,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.01
+          },
+          "confidence": 0.91
+        },
+        "work": {
+          "type": "choice",
+          "choice": "investigate",
+          "probabilities": {
+            "investigate": 0.99,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.01,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0
+          },
+          "confidence": 0.99
+        },
+        "clarity": {
+          "type": "choice",
+          "choice": "unresolved",
+          "probabilities": {
+            "clear": 0.33,
+            "unresolved": 0.46,
+            "unknown": 0.21
+          },
+          "confidence": 0.19
+        },
+        "risk": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "low": 0.93,
+            "medium": 0.06,
+            "high": 0,
+            "unknown": 0.01
+          },
+          "confidence": 0.91
+        },
+        "methodGate": {
+          "type": "choice",
+          "choice": "none_observed",
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.93,
+            "unknown": 0.06
+          },
+          "confidence": 0.89
+        },
+        "capability": {
+          "type": "score",
+          "score": 0.88,
+          "confidence": 0.67
+        },
+        "clarification": {
+          "type": "bool",
+          "probability": 0.51
+        },
+        "skill_0": {
+          "type": "bool",
+          "probability": 0.96
+        },
+        "skill_1": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_2": {
+          "type": "bool",
+          "probability": 0.08
+        },
+        "skill_3": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_4": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_5": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_6": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_7": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_8": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_9": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_10": {
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_11": {
+          "type": "bool",
+          "probability": 0.08
+        }
+      },
+      "validatedFields": {
+        "relation": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "same_task",
+          "confidence": 0.62,
+          "probabilities": {
+            "same_task": 0.75,
+            "new_task": 0.2,
+            "uncertain": 0.05
+          }
+        },
+        "messageEffect": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "request_work",
+          "confidence": 0.91,
+          "probabilities": {
+            "request_work": 0.92,
+            "continue": 0.01,
+            "explain": 0.04,
+            "change_scope": 0.01,
+            "pause": 0.01,
+            "cancel": 0,
+            "clarify_reference": 0.01
+          }
+        },
+        "work": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "investigate",
+          "confidence": 0.99,
+          "probabilities": {
+            "investigate": 0.99,
+            "requirements": 0,
+            "design": 0,
+            "task_plan": 0,
+            "implement": 0,
+            "verify": 0.01,
+            "diagnose": 0,
+            "answer": 0,
+            "unknown": 0
+          }
+        },
+        "clarity": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "unresolved",
+          "confidence": 0.19,
+          "probabilities": {
+            "clear": 0.33,
+            "unresolved": 0.46,
+            "unknown": 0.21
+          }
+        },
+        "risk": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "low",
+          "confidence": 0.91,
+          "probabilities": {
+            "low": 0.93,
+            "medium": 0.06,
+            "high": 0,
+            "unknown": 0.01
+          }
+        },
+        "methodGate": {
+          "status": "valid",
+          "type": "choice",
+          "choice": "none_observed",
+          "confidence": 0.89,
+          "probabilities": {
+            "waiting": 0.01,
+            "none_observed": 0.93,
+            "unknown": 0.06
+          }
+        },
+        "capability": {
+          "status": "valid",
+          "type": "score",
+          "score": 0.88,
+          "confidence": 0.67
+        },
+        "clarification": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.51
+        },
+        "skill_0": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.96
+        },
+        "skill_1": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_2": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.08
+        },
+        "skill_3": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_4": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_5": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_6": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_7": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_8": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_9": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_10": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.07
+        },
+        "skill_11": {
+          "status": "valid",
+          "type": "bool",
+          "probability": 0.08
+        }
+      },
+      "usage": {
+        "input": 3245,
+        "output": 581,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 3826,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    }
+  ],
+  "routes": [
+    {
+      "reason": "user",
+      "model": "magpie/zies/gpt-6.1-sol",
+      "thinking": "high",
+      "profile": "converge",
+      "requested": 1,
+      "protected": 3,
+      "budget": 1,
+      "transitions": 0,
+      "outcome": "valid"
+    },
+    {
+      "reason": "continuation",
+      "model": "magpie/zies/gpt-6.1-sol",
+      "thinking": "high"
+    },
+    {
+      "reason": "user",
+      "model": "magpie/luckyg/space-bunny-free",
+      "thinking": "low",
+      "profile": "respond",
+      "requested": 0,
+      "protected": 0,
+      "budget": 3,
+      "transitions": 0,
+      "outcome": "valid"
+    }
+  ],
+  "responses": [
+    {
+      "model": "magpie/zies/gpt-6.1-sol",
+      "thinking": "high",
+      "guidePresent": true
+    },
+    {
+      "model": "magpie/zies/gpt-6.1-sol",
+      "thinking": "high",
+      "guidePresent": true
+    },
+    {
+      "model": "magpie/luckyg/space-bunny-free",
+      "thinking": "low",
+      "guidePresent": true
+    }
+  ],
+  "semantic": [
+    {
+      "fixture": "alternate-directory",
+      "outcome": "valid",
+      "work": {
+        "status": "valid",
+        "type": "choice",
+        "choice": "investigate",
+        "confidence": 0.99,
+        "probabilities": {
+          "investigate": 0.99,
+          "requirements": 0,
+          "design": 0,
+          "task_plan": 0,
+          "implement": 0,
+          "verify": 0.01,
+          "diagnose": 0,
+          "answer": 0,
+          "unknown": 0
+        }
+      },
+      "capability": {
+        "status": "valid",
+        "type": "score",
+        "score": 0.83,
+        "confidence": 0.56
+      },
+      "skills": [
+        {
+          "candidateId": "s0-82557badbb69",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.96
+          }
+        },
+        {
+          "candidateId": "s1-82557badbb69",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.05
+          }
+        }
+      ],
+      "coverage": "known",
+      "candidates": 2,
+      "recall": {
+        "total": 2,
+        "considered": 2,
+        "omitted": 0,
+        "capacityFixture": false
+      },
+      "expectedRelevantCandidate": "s0-82557badbb69",
+      "suggested": [
+        "s0-82557badbb69"
+      ]
+    },
+    {
+      "fixture": "no-skills",
+      "outcome": "valid",
+      "work": {
+        "status": "valid",
+        "type": "choice",
+        "choice": "investigate",
+        "confidence": 0.92,
+        "probabilities": {
+          "investigate": 0.9299999999999999,
+          "requirements": 0,
+          "design": 0.01,
+          "task_plan": 0,
+          "implement": 0,
+          "verify": 0.04,
+          "diagnose": 0,
+          "answer": 0,
+          "unknown": 0.02
+        }
+      },
+      "capability": {
+        "status": "valid",
+        "type": "score",
+        "score": 0.84,
+        "confidence": 0.55
+      },
+      "skills": [],
+      "coverage": "known",
+      "candidates": 0,
+      "recall": {
+        "total": 0,
+        "considered": 0,
+        "omitted": 0,
+        "capacityFixture": false
+      },
+      "expectedRelevantCandidate": null,
+      "suggested": []
+    },
+    {
+      "fixture": "large-directory",
+      "outcome": "valid",
+      "work": {
+        "status": "valid",
+        "type": "choice",
+        "choice": "investigate",
+        "confidence": 0.99,
+        "probabilities": {
+          "investigate": 0.99,
+          "requirements": 0,
+          "design": 0,
+          "task_plan": 0,
+          "implement": 0,
+          "verify": 0.01,
+          "diagnose": 0,
+          "answer": 0,
+          "unknown": 0
+        }
+      },
+      "capability": {
+        "status": "valid",
+        "type": "score",
+        "score": 0.88,
+        "confidence": 0.67
+      },
+      "skills": [
+        {
+          "candidateId": "synthetic-0",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.96
+          }
+        },
+        {
+          "candidateId": "synthetic-1",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-2",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.08
+          }
+        },
+        {
+          "candidateId": "synthetic-3",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-4",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-5",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-6",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-7",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-8",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-9",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-10",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.07
+          }
+        },
+        {
+          "candidateId": "synthetic-11",
+          "field": {
+            "status": "valid",
+            "type": "bool",
+            "probability": 0.08
+          }
+        }
+      ],
+      "coverage": "partial",
+      "candidates": 12,
+      "recall": {
+        "total": 30,
+        "considered": 12,
+        "omitted": 18,
+        "capacityFixture": true
+      },
+      "expectedRelevantCandidate": "synthetic-0",
+      "suggested": [
+        "synthetic-0"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "kind": "proposed",
+      "id": "a174e33a26ab2168410f229a13fb8ed8f1e1536bc00fa891a63a0f5e132471ea"
+    },
+    {
+      "kind": "invalidated",
+      "id": "a174e33a26ab2168410f229a13fb8ed8f1e1536bc00fa891a63a0f5e132471ea"
+    }
+  ],
+  "limits": {
+    "classifierCalls": 6,
+    "chatCalls": 3,
+    "actualAttempts": 6
+  },
+  "passed": false,
+  "targets": {
+    "light": {
+      "provider": "magpie",
+      "model": "luckyg/space-bunny-free",
+      "thinkingLevel": "low"
+    },
+    "standard": {
+      "provider": "magpie",
+      "model": "zies/gpt-6-luna",
+      "thinkingLevel": "high"
+    },
+    "heavy": {
+      "provider": "magpie",
+      "model": "zies/gpt-6.1-sol",
+      "thinkingLevel": "high"
+    }
+  },
+  "toolResults": [
+    {
+      "isError": true,
+      "accepted": false,
+      "reason": "readiness-not-accepted"
+    }
+  ],
+  "guideStatuses": [
+    "projected",
+    "response-observed",
+    "projected",
+    "response-observed"
+  ],
+  "assistant": [
+    {
+      "stopReason": "toolUse",
+      "model": "magpie/zies/gpt-6.1-sol",
+      "usage": {
+        "input": 2123,
+        "output": 720,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 109,
+        "totalTokens": 2843,
+        "cost": {
+          "input": 0.004246,
+          "output": 0.007200000000000001,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.011446000000000001
+        }
+      }
+    },
+    {
+      "stopReason": "stop",
+      "model": "magpie/zies/gpt-6.1-sol",
+      "usage": {
+        "input": 843,
+        "output": 78,
+        "cacheRead": 1920,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 2841,
+        "cost": {
+          "input": 0.001686,
+          "output": 0.0007800000000000001,
+          "cacheRead": 0.000192,
+          "cacheWrite": 0,
+          "total": 0.002658
+        }
+      }
+    },
+    {
+      "stopReason": "stop",
+      "model": "magpie/luckyg/space-bunny-free",
+      "usage": {
+        "input": 3952,
+        "output": 69,
+        "cacheRead": 128,
+        "cacheWrite": 0,
+        "reasoning": 1,
+        "totalTokens": 4149,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      }
+    }
+  ],
+  "invalidFields": [],
+  "fieldValidity": {
+    "total": 83,
+    "invalid": 0,
+    "missing": 0
+  },
+  "extensionErrors": [],
+  "transportPassed": true,
+  "handoff": {
+    "accepted": false,
+    "consumed": false,
+    "physicalResponseObserved": false
+  },
+  "qualityAcceptance": "Exploratory synthetic evidence; no accuracy, universal gate, cache or cost guarantee",
+  "personalFilesUnchanged": true,
+  "temporaryCredentialsCleaned": true
+}

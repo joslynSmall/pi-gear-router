@@ -6,6 +6,20 @@
   // 是否启用路由。false 时不调用 Jev，优先沿用最近实际使用的物理模型与等级。
   "enabled": true,
 
+  // 默认 task；observer 需显式修改为 "observer" 且 workflow.enabled:false。
+  // task/observer 与 workflow.enabled:true 冲突时 legacy-workflow 优先并诊断。
+  // observer 项目级全部 overrides 要求 Pi project trust；不代表工具修改授权。
+  "routingMode": "task",
+  "observer": {
+    "guidance": { "enabled": true, "maxCandidates": 2, "maxChars": 800, "maxPerTask": 6 },
+    "skills": { "enabled": true },
+    "stageAware": true,
+    "minBands": { "converge": 3, "implement": 1, "verify": 1, "respond": 0 },
+    "maxCallsPerTask": 24,
+    "maxTransitions": 4,
+    "maxTransportRetries": 0
+  },
+
   // -1..1。按 gearBias × 0.4 平移分数后落档：负值偏向低成本档位，正值偏向高能力档位。
   "gearBias": 0,
 
@@ -28,7 +42,7 @@
     "heavy":    { "provider": "yourprovider", "model": "frontier-model-id", "thinkingLevel": "high" }
   },
 
-  // Jev 分类调用的超时（毫秒）。连接失败会在此窗口内做有界重试。
+  // Jev 分类调用总 deadline（毫秒）。observer 默认无 retry，可选最多一次 transport retry。
   "judgeTimeoutMs": 15000,
 
   // 任务感知路由参数。省略则使用内置默认。
@@ -41,5 +55,24 @@
     "downgradeMargin": 0.08,
     // 评分与关系确认门槛，不等同于准确率。0.5..1。
     "minConfidence": 0.8
+  },
+
+  // 阶段编排为显式 opt-in；默认 false，不改变既有 task-aware 路由。
+  // 启用后，交付请求可在一个 agent run 内经“只读规划/恢复 → 已验证 handoff → 执行/验证”。
+  // 这不会在不同物理模型间迁移 KV/prompt cache；阶段切换可能是一次新的 cache miss。
+  "workflow": {
+    "enabled": false,
+    // 各阶段最小 capability band 下标（基于上方 bands 数组）。
+    "planningMinBand": 3,
+    "executionMinBand": 1,
+    "atomicExecutionMinBand": 0,
+    "verificationMinBand": 1,
+    "recoveryMinBand": 3,
+    // handoff 的 delivery/readiness/risk/capability Jev 判定最小置信度。0.5..1。
+    "handoffMinConfidence": 0.8,
+    // 一个 workflow 最多可消费的阶段转换。1..8。
+    "maxTransitions": 6,
+    // planning/recovery 自然结束但无 handoff 时的自动提醒次数；只能是 0 或 1。
+    "maxReminderContinuations": 1
   }
 }

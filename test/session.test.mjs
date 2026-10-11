@@ -18,7 +18,7 @@ function setup(session = SessionManager.inMemory(), scores = [.2, 1], relation =
   let route;
   const handlers = new Map();
   let calls = 0;
-  extension({ on: (name, handler) => handlers.set(name, handler), appendEntry: (type, data) => session.appendCustomEntry(type, data), registerVirtualModel: (definition) => { route = definition.route; } });
+  extension({ on: (name, handler) => { const previous = handlers.get(name); handlers.set(name, (...args) => { previous?.(...args); return handler(...args); }); }, appendEntry: (type, data) => session.appendCustomEntry(type, data), registerVirtualModel: (definition) => { route = definition.route; } });
   const ctx = { mode: 'print', model: { provider: 'gears', id: 'auto' }, sessionManager: session, modelRegistry: {
     find: (_provider, id) => ({ provider: 'test', id, api: 'openai-responses', reasoning: true }),
     hasConfiguredAuth: () => true,

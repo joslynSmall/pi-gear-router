@@ -11,6 +11,57 @@ process.env.PI_GEAR_ROUTER_DATA_DIR = dir;
 const { loadSettings, saveSettings, SETTINGS_PATH, projectSettingsPath } = await import('../src/settings.ts');
 after(() => rmSync(dir, { recursive: true, force: true }));
 
+test('observer settings validate independent limits and preserve JSONC overlay inheritance', () => {
+  writeFileSync(SETTINGS_PATH, `{// observer is opt-in\n"routingMode":"observer","observer":{"maxCallsPerTask":64,"maxTransitions":8,"maxTransportRetries":1,
+    "guidance":{"enabled":false,"maxCandidates":1,"maxChars":700,"maxPerTask":12},"skills":{"enabled":false},"stageAware":false,
+    "minBands":{"converge":15,"implement":0,"verify":2,"respond":1}}}`);
+  const s = loadSettings();
+  assert.equal(s.routingMode, 'observer');
+  assert.deepEqual(s.observer, { maxCallsPerTask: 64, maxTransitions: 8, maxTransportRetries: 1, guidance: { enabled: false, maxCandidates: 1, maxChars: 700, maxPerTask: 12 },
+    skills: { enabled: false }, stageAware: false, minBands: { converge: 15, implement: 0, verify: 2, respond: 1 } });
+  const project = join(dir, 'observer-project'); mkdirSync(join(project, '.pi', 'pi-gear-router'), { recursive: true });
+  writeFileSync(projectSettingsPath(project), JSON.stringify({ observer: { maxCallsPerTask: 23, guidance: { enabled: true, maxCandidates: 3 }, minBands: { converge: 99 } } }));
+  const layered = loadSettings(project, { projectTrusted: true });
+  assert.equal(layered.observer.maxCallsPerTask, 23); assert.equal(layered.observer.guidance.enabled, true);
+  assert.equal(layered.observer.guidance.maxCandidates, 1); assert.equal(layered.observer.minBands.converge, 99);
+  const copy = loadSettings(); copy.observer.guidance.maxPerTask = 0; assert.equal(loadSettings().observer.guidance.maxPerTask, 12);
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ observer: { maxCallsPerTask: 65, maxTransitions: 9, maxTransportRetries: 2, stageAware: 'yes',
+    guidance: { maxCandidates: -1, maxChars: 801, maxPerTask: 13 }, minBands: { converge: -1 } } }));
+  assert.deepEqual(loadSettings().observer, defaultSettings().observer);
+  rmSync(SETTINGS_PATH);
+});
+
+test('invalid modes disable observer opt-in rather than inheriting it from a fallback', () => {
+  const project = join(dir, 'invalid-mode-project'); mkdirSync(join(project, '.pi', 'pi-gear-router'), { recursive: true });
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ routingMode: 'observer' }));
+  writeFileSync(projectSettingsPath(project), JSON.stringify({ routingMode: 'typo' }));
+  const s = loadSettings(project, { projectTrusted: true });
+  assert.equal(s.routingMode, undefined); assert.equal(s.routingModeInvalid, true);
+  for (const value of [null, 7, false, [], {}]) {
+    writeFileSync(SETTINGS_PATH, JSON.stringify({ routingMode: value }));
+    assert.equal(loadSettings().routingModeInvalid, true); assert.equal(loadSettings().routingMode, undefined);
+  }
+  rmSync(SETTINGS_PATH);
+});
+
+test('untrusted or capability-unknown project cannot opt into or override observer policy', () => {
+  const project = join(dir, 'observer-trust-project'); mkdirSync(join(project, '.pi', 'pi-gear-router'), { recursive: true });
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ gearBias: .1 }));
+  writeFileSync(projectSettingsPath(project), JSON.stringify({ routingMode: 'observer', gearBias: -.5 }));
+  for (const options of [undefined, { projectTrusted: false }, { projectTrusted: undefined }]) {
+    const s = loadSettings(project, options); assert.equal(s.routingMode, undefined); assert.equal(s.gearBias, .1);
+  }
+  assert.equal(loadSettings(project, { projectTrusted: true }).routingMode, 'observer');
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ routingMode: 'observer', gearBias: .1 }));
+  writeFileSync(projectSettingsPath(project), JSON.stringify({ routingMode: 'task', gearBias: -.5 }));
+  assert.equal(loadSettings(project, { projectTrusted: false }).routingMode, 'observer');
+  assert.equal(loadSettings(project, { projectTrusted: true }).routingMode, 'task');
+  // No new trust behavior is imposed on the existing default task mode.
+  writeFileSync(SETTINGS_PATH, '{}'); writeFileSync(projectSettingsPath(project), JSON.stringify({ gearBias: -.5 }));
+  assert.equal(loadSettings(project).gearBias, -.5);
+  rmSync(SETTINGS_PATH);
+});
+
 test('score boundaries, bias, and clamp select the expected tier', () => {
   for (const [score, bias, gear, thinkingLevel, adjustedScore] of [
     [0, 0, 'light', 'high', 0], [0.499, 0, 'light', 'high', 0.499],
@@ -46,6 +97,33 @@ test('malformed and partial files retain defaults; invalid levels and empty name
   assert.deepEqual(s.gears.light, defaultSettings().gears.light);
   assert.deepEqual(s.gears.standard, defaultSettings().gears.standard);
   assert.equal(s.gears.heavy.thinkingLevel, 'minimal');
+});
+
+test('workflow policy is opt-in, validates bounds, and clamps inherited bands after a band-table change', () => {
+  const customBands = [
+    { max: 1, gear: 'light', thinkingLevel: 'low' },
+    { gear: 'heavy', thinkingLevel: 'high' },
+  ];
+  writeFileSync(SETTINGS_PATH, JSON.stringify({
+    bands: customBands,
+    workflow: {
+      enabled: true, planningMinBand: 1, executionMinBand: 0, atomicExecutionMinBand: 0,
+      verificationMinBand: 0, recoveryMinBand: 1, handoffMinConfidence: .9, maxTransitions: 8, maxReminderContinuations: 0,
+    },
+  }));
+  assert.deepEqual(loadSettings().workflow, {
+    enabled: true, planningMinBand: 1, executionMinBand: 0, atomicExecutionMinBand: 0,
+    verificationMinBand: 0, recoveryMinBand: 1, handoffMinConfidence: .9, maxTransitions: 8, maxReminderContinuations: 0,
+  });
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ bands: customBands, workflow: {
+    enabled: 'yes', planningMinBand: 2, executionMinBand: -1, atomicExecutionMinBand: 1.2,
+    verificationMinBand: '0', recoveryMinBand: 3, handoffMinConfidence: .4, maxTransitions: 9, maxReminderContinuations: 2,
+  } }));
+  assert.deepEqual(loadSettings().workflow, {
+    ...defaultSettings().workflow, planningMinBand: 1, recoveryMinBand: 1,
+  });
+  assert.equal(defaultSettings().workflow.enabled, false);
+  rmSync(SETTINGS_PATH);
 });
 
 test('task policy validates each field independently, including zero inheritance', () => {
@@ -163,5 +241,6 @@ test('the shipped example.settings.json is valid and loadable', () => {
   assert.equal(s.gears.light.provider, 'yourprovider');
   assert.equal(s.bands.length, 5);
   assert.equal(s.taskRouting.downgradeWindow, 2);
+  assert.equal(s.workflow.enabled, false);
   rmSync(SETTINGS_PATH);
 });

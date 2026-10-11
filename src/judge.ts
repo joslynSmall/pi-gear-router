@@ -21,7 +21,7 @@ const JUDGE_MAX_RETRIES = 2;
 const JUDGE_RETRY_BASE_MS = 250;
 
 /** Retry transport-level failures that pi-ai folds into a `stopReason=error` result instead of throwing. */
-function resilientFetch(maxWaitMs: number, signal?: AbortSignal): FetchFunction {
+export function resilientFetch(maxWaitMs: number, signal?: AbortSignal): FetchFunction {
 	const base = globalThis.fetch;
 	return async (input, init) => {
 		const deadline = Date.now() + maxWaitMs;

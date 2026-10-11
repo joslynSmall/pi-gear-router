@@ -90,11 +90,15 @@ test('uncertain relation is provisional, not a permanent difficulty floor', asyn
   assert.equal(d.requestedBand, 0);
 });
 
-test('configuration fingerprint ignores key order but reacts to effective values', () => {
+test('configuration fingerprint ignores key order, keeps dormant workflow tuning inert, and reacts when opt-in', () => {
   const h = setup();
   const reordered = { ...h.settings, taskRouting: { minConfidence: .8, downgradeMargin: .08, downgradeWindow: 2, maxInheritedTurns: 3 } };
   assert.equal(policyFingerprint(reordered), policyFingerprint(h.settings));
   assert.notEqual(policyFingerprint({ ...h.settings, gearBias: .3 }), policyFingerprint(h.settings));
+  assert.equal(policyFingerprint({ ...h.settings, workflow: { ...h.settings.workflow, planningMinBand: 1 } }), policyFingerprint(h.settings));
+  const enabled = { ...h.settings, workflow: { ...h.settings.workflow, enabled: true } };
+  assert.notEqual(policyFingerprint(enabled), policyFingerprint(h.settings));
+  assert.notEqual(policyFingerprint({ ...enabled, workflow: { ...enabled.workflow, planningMinBand: 1 } }), policyFingerprint(enabled));
 });
 
 test('invalid and oversized task state is never eligible for inheritance', async () => {

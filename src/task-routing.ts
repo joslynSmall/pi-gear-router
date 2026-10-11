@@ -6,9 +6,19 @@ import type { Band, BranchFacts, DecisionTrace, GearJudgment, GearSettings, Gear
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export function policyFingerprint(settings: GearSettings): string {
-	return hash({ version: `task-window-v1:${CONTEXT_VERSION}:judge-task-v1:verify-command-v1`, classifier: "typesafe/jev-latest", enabled: settings.enabled,
+	const base = {
+		version: `task-window-v1:${CONTEXT_VERSION}:judge-task-v1:verify-command-v1`, classifier: "typesafe/jev-latest", enabled: settings.enabled,
 		bias: settings.gearBias, bands: settings.bands.map(band => [band.max ?? null, band.gear, band.thinkingLevel]), gears: [settings.gears.light, settings.gears.standard, settings.gears.heavy].map(t => [t.provider, t.model, t.thinkingLevel]), timeout: settings.judgeTimeoutMs,
-		policy: [settings.taskRouting.maxInheritedTurns, settings.taskRouting.downgradeWindow, settings.taskRouting.downgradeMargin, settings.taskRouting.minConfidence] });
+		policy: [settings.taskRouting.maxInheritedTurns, settings.taskRouting.downgradeWindow, settings.taskRouting.downgradeMargin, settings.taskRouting.minConfidence],
+	};
+	// Preserve the task-aware fingerprint byte-for-byte while workflow is disabled. This keeps
+	// existing task state eligible for normal inheritance and makes dormant workflow tuning inert.
+	if (!settings.workflow.enabled) return hash(base);
+	return hash({ ...base, version: `${base.version}:workflow-v1`, workflow: [
+		settings.workflow.planningMinBand, settings.workflow.executionMinBand, settings.workflow.atomicExecutionMinBand,
+		settings.workflow.verificationMinBand, settings.workflow.recoveryMinBand, settings.workflow.handoffMinConfidence,
+		settings.workflow.maxTransitions, settings.workflow.maxReminderContinuations,
+	] });
 }
 const finite = (v: unknown, min: number, max: number) => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
 const string = (v: unknown, max = 256) => typeof v === "string" && v.length > 0 && v.length <= max;
@@ -51,6 +61,8 @@ export interface TaskDecisionInput {
 	policyFingerprint: string;
 	facts: BranchFacts;
 	savedDispatchUsable: boolean;
+	/** Opt-in workflow mode reclassifies every real user turn instead of inheriting continuations. */
+	forceRejudge?: boolean;
 }
 export interface TaskDecision {
 	task?: TaskState | undefined;
@@ -74,7 +86,7 @@ export async function decideTask(input: TaskDecisionInput, judge: (context: Judg
 	const changed = !!task && task.policyFingerprint !== input.policyFingerprint;
 	const unknown = facts.coverage === "unknown" || facts.contextMissing;
 	const newReviewEvidence = !!task?.review && !task.seenEvidenceKeys.includes(key);
-	const trigger = !task || !turnId ? "no-task" : changed ? "config-changed" : previous?.fallback ? "previous-fallback"
+	const trigger = input.forceRejudge ? "workflow-turn" : !task || !turnId ? "no-task" : changed ? "config-changed" : previous?.fallback ? "previous-fallback"
 		: !input.savedDispatchUsable ? "target-changed" : facts.verificationFailed ? "verification-failed"
 		: facts.manualModelGap ? "manual-model-gap" : unknown ? "context-missing" : facts.completionHint ? "completion-hint"
 		: task.requireRejudge || task.continuity !== "confirmed" ? "uncertain" : !continuation ? "request-changed"

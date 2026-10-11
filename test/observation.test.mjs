@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isVerificationCommand, registerObservations, branchFacts, OBSERVATION_TYPE } from '../src/observation.ts';
+import { isVerificationCommand, verificationCommandKind, registerObservations, branchFacts, OBSERVATION_TYPE } from '../src/observation.ts';
+import { newWorkflowState, WORKFLOW_EVENT_TYPE } from '../src/workflow-routing.ts';
 test('verification recognizer excludes ambiguous shell chains and arbitrary commands', () => {
   for (const command of ['npm test', 'npm run typecheck && npm test', 'pnpm test --run', 'npx tsc --noEmit']) assert.equal(isVerificationCommand(command), true, command);
+  assert.equal(verificationCommandKind('npm run typecheck && npm test'), 'npm');
+  assert.equal(verificationCommandKind('echo test'), undefined);
   for (const command of ['echo test', 'npm test && git status', 'cd foo && npm test', 'npm test; echo ok', 'npm test | tee log', 'npm test\n', 'npm test || true', 'npm test $(echo x)']) assert.equal(isVerificationCommand(command), false, command);
 });
 test('nested failed verification persists only a bounded branch marker once per user turn', () => {
@@ -16,6 +19,28 @@ test('nested failed verification persists only a bounded branch marker once per 
   assert.deepEqual(entries.at(-1).data, { version: 1, taskId: 't1', turnId: 'u1', kind: 'verification-failed' });
   const facts = branchFacts(ctx, { taskId: 't1', observationCursor: 's1' }, [], true);
   assert.equal(facts.verificationFailed, true);
+});
+
+test('workflow validation facts are branch-scoped, deduplicated, and never retain command text/output', () => {
+  const workflow = newWorkflowState({ workflowId: 'workflow:u1', initialTurnId: 'u1', objective: 'deliver', phase: 'execution', policyFingerprint: 'a'.repeat(64), requestedBand: 1 });
+  const entries = [{ type: 'custom', id: 's1', customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: { turnId: 'u1', workflow, task: { taskId: 't1' } } } }];
+  let handler;
+  registerObservations({ on: (_name, fn) => { handler = fn; }, appendEntry: (type, data) => entries.push({ type: 'custom', id: `e-${entries.length}`, customType: type, data }) });
+  const ctx = { model: { provider: 'gears', id: 'auto' }, sessionManager: { getBranch: () => entries } };
+  const passed = { toolName: 'bash', input: { command: 'npm test' }, structuredContent: { exit_code: 0, output: 'sensitive test output' }, isError: false };
+  handler(passed, ctx); handler(passed, ctx);
+  const failed = { ...passed, structuredContent: { exit_code: 1, output: 'more sensitive output' }, isError: true };
+  handler(failed, ctx); handler(failed, ctx);
+  // A repair and rerun may legitimately reverse a previous failure; only consecutive identical outcomes deduplicate.
+  handler(passed, ctx);
+  const facts = entries.filter(entry => entry.customType === WORKFLOW_EVENT_TYPE).map(entry => entry.data);
+  assert.deepEqual(facts, [
+    { version: 1, kind: 'validation', workflowId: 'workflow:u1', sourceTurnId: 'u1', outcome: 'passed', commandKind: 'npm' },
+    { version: 1, kind: 'validation', workflowId: 'workflow:u1', sourceTurnId: 'u1', outcome: 'failed', commandKind: 'npm' },
+    { version: 1, kind: 'validation', workflowId: 'workflow:u1', sourceTurnId: 'u1', outcome: 'passed', commandKind: 'npm' },
+  ]);
+  assert.equal(JSON.stringify(facts).includes('sensitive'), false);
+  assert.equal(entries.filter(entry => entry.customType === OBSERVATION_TYPE).length, 1, 'existing failure marker remains available to task routing');
 });
 
 test('unknown or inconsistent exit metadata does not fabricate failed verification', () => {
