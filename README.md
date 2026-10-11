@@ -6,17 +6,48 @@
 
 ## 快速开始
 
-需要 Pi 1.1.0+、TypeSafe 凭据，以及目标物理模型的有效凭据。
+### 1. 准备 Pi 与凭据
+
+需要 Pi 1.1.0+、TypeSafe 凭据，以及目标物理模型的有效凭据。尚未安装 Pi 时，可在 Node.js 22.19+ 环境中执行：
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi --version
+```
+
+其他安装方式见 [Pi 安装指南](https://pi.dev/docs/latest/quickstart#1-install-pi)。启动 `pi`，在会话内运行 `/login typesafe`，按提示保存 TypeSafe API key；目标物理模型的供应商同样通过 `/login` 配置。Pi 将凭据保存在 `~/.pi/agent/auth.json`，不要提交到版本库。
+
+也可在启动 Pi 的 shell 中提供环境变量：
 
 ```sh
 export TYPESAFE_API_KEY="apikey_..."
-pi auth check --provider typesafe
+```
+
+`export` 只影响当前 shell 及其子进程，不会永久保存，也不会更新已启动的 Pi 进程；已有进程需要重启。Pi 内置 `typesafe/jev-latest`，无需另装 TypeSafe SDK 或启用 codemode。
+
+### 2. 安装扩展
+
+以下两种来源选一种，不要同时安装：
+
+```sh
+# 从 GitHub 安装
+pi install git:github.com/joslynSmall/pi-gear-router
+
+# 或引用已有的本地仓库目录（替换为实际路径）
 pi install /path/to/pi-gear-router
 ```
 
-Pi 内置 `typesafe/jev-latest`，无需另装 TypeSafe SDK。
+默认写入用户级 `~/.pi/agent/settings.json` 的 `packages`。仅供当前项目使用时加 `--local`，写入 `.pi/settings.json`；项目安装只在 Pi 项目信任确认后加载。扩展会执行代码，安装前应审阅来源，见 [Pi 包管理](https://pi.dev/docs/latest/packages)。
 
-创建 `~/.pi/agent/pi-gear-router/settings.json`，替换为 Pi 中已有且已鉴权的模型：
+### 3. 配置物理档位
+
+创建配置目录：
+
+```sh
+mkdir -p ~/.pi/agent/pi-gear-router
+```
+
+将下列内容保存为 **扩展自身的** `~/.pi/agent/pi-gear-router/settings.json`，替换为 Pi 中已有且已鉴权的模型。provider 和 model 必须与 Pi 中的标识一致，可先在 `/model` 中确认；自定义端点先按 [Pi 模型配置](https://pi.dev/docs/latest/models#configure-a-compatible-endpoint)接入。
 
 ```json
 {
@@ -28,13 +59,68 @@ Pi 内置 `typesafe/jev-latest`，无需另装 TypeSafe SDK。
 }
 ```
 
-档位按实际能力递增，可跨供应商。默认目标为 Anthropic Haiku／Sonnet／Opus，见 [`src/defaults.ts`](src/defaults.ts)。light 只是可用性兜底，不按每条消息挑选。thinking 使用该档配置并按模型支持范围裁剪，虚拟模型的 `/thinking` 选择不覆盖档位配置。
+档位按实际能力递增，可跨供应商。使用默认 Anthropic Haiku／Sonnet／Opus 时可省略此文件，但仍需 Anthropic 凭据，具体模型见 [`src/defaults.ts`](src/defaults.ts)。light 只是可用性兜底，不按每条消息挑选。thinking 使用该档配置并按模型支持范围裁剪，虚拟模型的 `/thinking` 选择不覆盖档位配置。
+
+### 4. 启用路由
+
+安装不等于启用。启动新会话时显式选择：
 
 ```sh
 pi --model gears/auto
 ```
 
-已有会话用 `/model` 选择 `gears/auto`；退出路由同样手选物理模型。要默认启用，把 `defaultProvider:"gears"`、`defaultModel:"auto"` 合并到 **Pi 自身的** `~/.pi/agent/settings.json`。若已有 `enabledModels`，将 `gears/**` 加入原列表，不要覆盖其他配置。
+已有会话先运行 `/reload` 加载刚安装或更新的扩展，再用 `/model` 选择 `gears/auto`。退出路由同样手选物理模型。
+
+若要新会话默认使用路由，先备份 **Pi 自身的** `~/.pi/agent/settings.json`，再合并以下两项；不要整份替换已有文件，保留 `packages` 等其他设置：
+
+```json
+{
+  "defaultProvider": "gears",
+  "defaultModel": "auto"
+}
+```
+
+若已有 `enabledModels`，将 `gears/**` 追加到原列表；未限制模型范围时无需新增该字段。默认设置作用于新会话，恢复旧会话仍可能还原旧模型，需用 `/model` 切换。
+
+### 5. 检查安装与配置
+
+```sh
+pi list
+pi --offline --no-mcp --list-models gears
+PI_OFFLINE=1 pi auth check --provider typesafe --no-refresh
+```
+
+`pi list` 应包含所选安装来源，模型列表应包含 provider 为 `gears`、model 为 `auto` 的记录。对各物理模型的供应商另执行 `PI_OFFLINE=1 pi auth check --provider yourprovider --no-refresh`，将 `yourprovider` 替换为实际供应商。
+
+这些命令不发起聊天或分类请求；`ready` 只表示凭据可解析，不证明远端服务健康。会话内用 `/gear-status` 查看状态；选择 `gears/auto` 后、首次请求前显示待评估，实际派发要等用户请求触发。
+
+### 更新与卸载
+
+GitHub 安装可更新指定包：
+
+```sh
+pi update git:github.com/joslynSmall/pi-gear-router
+```
+
+若安装来源固定到 Git 标签或 commit，更新不会自动改到其他版本。本地目录安装不复制源码，更新原仓库即可，无需再次 `pi install`：
+
+```sh
+git -C /path/to/pi-gear-router pull --ff-only
+```
+
+更新后在已有会话运行 `/reload`，或重启 Pi。仅修改扩展的档位配置不必重装，下一条用户消息会重新解析。
+
+卸载前先选回物理模型；若设置过默认路由，也要恢复 Pi 的 `defaultProvider`／`defaultModel`，并从已有模型范围中移除 `gears/**`。按 `pi list` 中的安装来源使用对应命令：
+
+```sh
+# GitHub 安装
+pi remove git:github.com/joslynSmall/pi-gear-router
+
+# 或本地目录安装
+pi remove /path/to/pi-gear-router
+```
+
+项目级安装在卸载命令中同样加 `--local`。卸载后 `/reload` 或重启；卸载不会删除本地源码、扩展个人配置、供应商凭据或会话。
 
 ## 如何工作
 
