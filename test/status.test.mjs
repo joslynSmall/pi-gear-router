@@ -49,7 +49,7 @@ test('TUI status shows pending then Jev score, gear and physical model', async (
   resolve({ stopReason: 'stop', answers: { gear: { type: 'score', score: 0.76, confidence: 0.8 } }, usage: { input: 22 } });
   const result = await pending;
   assert.equal(result.model.id, 'standard');
-  assert.match(h.statuses.at(-1).text, /Jev 0\.76 → standard\/medium → test\/standard/);
+  assert.match(h.statuses.at(-1).text, /路由 计划 · standard · Jev 0\.76 → standard\/medium → test\/standard/);
 });
 
 test('fallback, disabled, restore and shutdown status are marked or cleared', async () => {
@@ -60,7 +60,7 @@ test('fallback, disabled, restore and shutdown status are marked or cleared', as
     registerVirtualModel: (d) => { route = d.route; },
   });
   const result = await route({ reason: 'user', thinkingLevel: 'high', messages: [user] }, h.ctx);
-  assert.match(h.statuses.at(-1).text, /Jev 不可用 · classify-error → standard\/medium fallback → test\/standard/);
+  assert.match(h.statuses.at(-1).text, /路由 计划 · heavy · Jev 不可用 → heavy\/high fallback → test\/heavy/);
   h.branch.push({ type: 'custom', customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: result.state } });
   const start = h.handlers.get('session_start');
   await start({ type: 'session_start' }, h.ctx);

@@ -44,6 +44,7 @@ test('offline SDK loop persists task state and sees nested codemode verification
     await session.setModel(runtime.getModel('gears', 'auto'));
     const state = () => manager.getBranch().findLast(e => e.type === 'custom' && e.customType === 'pi.virtual-model-state')?.data.state;
     turn = 1; await session.prompt('Analyze concurrency defects then implement the payment design');
+    const current = state(); assert.equal(current.phaseRoute.phase, 'implement', JSON.stringify(current.phaseRoute));
     assert.equal(classifiers, 1); assert.equal(state().task.committedBand, 4);
     const taskId = state().task.taskId;
     turn = 2; await session.prompt('继续');

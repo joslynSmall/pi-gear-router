@@ -7,6 +7,7 @@ import type {
 	ModelRouteRequest,
 } from "@earendil-works/pi-coding-agent";
 import { bandForScore, clampScore, gearTarget, targetForBand, resolveRoutingMode } from "./gears.ts";
+import { activeGear, explicitPhaseIntent, implementationGear, initialPlanGear, phaseChoiceIntent, PHASE_CHOICES, validPhaseState, type PhaseRouteState } from "./phase-routing.ts";
 import { judgeTask } from "./judge.ts";
 import { buildTaskContext } from "./task-context.ts";
 import { decideTask, policyFingerprint, validTask } from "./task-routing.ts";
@@ -111,6 +112,10 @@ function shortReason(text: string): string {
 }
 
 /** Fixed labels only: persisted diagnostic text must never become footer content. */
+function explicitRevisionRequest(text: string): "revise" | undefined {
+	return explicitPhaseIntent(text) === "revise" ? "revise" : undefined;
+}
+
 function workflowDiagnosticStatus(value: WorkflowDiagnostic | undefined): string {
 	if (!value || value.version !== 1) return "工作流待评估：新请求生效";
 	const labels: Record<WorkflowDiagnostic["reason"], string> = {
@@ -171,8 +176,13 @@ function showStatus(ctx: ExtensionContext, state?: GearState, pending = false, t
 	const settings = runtimeSettings(ctx);
 	const workflow = resolveRoutingMode(settings).mode === "legacy-workflow" ? workflowUsable(state, settings) : undefined;
 	const phase = workflow?.phase;
+	const sessionLocked = !phase && !!state.sessionLock;
 	const result = phase
 		? `工作流 ${phase}${workflow?.lastTransition?.reason === "accepted-handoff" ? " · 已接受交接" : workflow?.lastTransition?.reason === "blocked" ? " · 已阻塞" : workflow?.lastTransition?.reason === "budget-exhausted" ? " · 转换预算耗尽" : ""}`
+		: state.phaseRoute
+			? `路由 ${state.phaseRoute.phase === "plan" ? "计划" : state.phaseRoute.revising ? "计划修订" : "实现"} · ${activeGear(state.phaseRoute)}${state.score >= 0 ? ` · Jev ${state.score.toFixed(2)}` : state.decision?.judgeFailure ? " · Jev 不可用" : ""}`
+		: sessionLocked
+			? `会话锁定 ${state.sessionLock!.gear}${state.decision?.source === "inherited" ? "" : state.score >= 0 ? ` · Jev ${state.score.toFixed(2)}` : state.decision?.judgeFailure ? ` · Jev 不可用 · ${shortReason(state.decision.judgeFailure)}` : " · Jev 不可用"}`
 		: state.decision?.source === "inherited"
 			? `沿用 Jev ${state.score.toFixed(2)} · 续接 ${state.task?.inheritedTurns ?? 0}/${loadSettings(ctx.cwd).taskRouting.maxInheritedTurns}`
 			: state.score >= 0 ? `Jev ${state.score.toFixed(2)}${state.decision?.action === "uncertain" ? " · 关系不明" : state.task?.review || (state.decision?.action === "hold" && (state.decision.requestedBand ?? 0) > bandForScore(state.adjustedScore, 0, loadSettings(ctx.cwd).bands)) ? " · 降档保护" : ""}` : state.decision?.judgeFailure ? `Jev 不可用 · ${shortReason(state.decision.judgeFailure)}` : "Jev 不可用";
@@ -322,9 +332,10 @@ export default function (pi: ExtensionAPI) {
 			const old = request.state;
 			if (request.reason === "direct") {
 				if (mode.mode === "observer") { observerDispatch.delete(ctx.sessionManager); showStatus(ctx); }
-				const pair = !settings.enabled ? previousPair(request, ctx)
-					?? resolveGear(FALLBACK_GEAR, request, ctx, settings)
-					: resolveGear("light", request, ctx, settings);
+				const pair = !settings.enabled || mode.mode !== "task" ? previousPair(request, ctx)
+					?? resolveGear(mode.mode === "task" ? FALLBACK_GEAR : "light", request, ctx, settings)
+					: resolveGear(old?.sessionLock?.gear ?? FALLBACK_GEAR, request, ctx, settings,
+						gearTarget(settings, old?.sessionLock?.gear ?? FALLBACK_GEAR).thinkingLevel);
 				request.signal?.throwIfAborted();
 				return { model: pair.model, thinkingLevel: pair.thinkingLevel };
 			}
@@ -480,11 +491,59 @@ export default function (pi: ExtensionAPI) {
 				? workflowNonStart(outcome, currentHasNonTextInput, id, settings.workflow.handoffMinConfidence) : undefined;
 			const requestedBand = workflowRequestedBand ?? decision.requestedBand;
 			const desired = requestedBand !== undefined ? targetForBand(settings, requestedBand) : undefined;
-			const wanted = desired?.gear ?? old?.gear ?? FALLBACK_GEAR;
-			const thinkingLevel = desired?.thinkingLevel ?? old?.dispatch?.thinkingLevel;
-			const retained = !workflow && decision.retainSavedDispatch && old ? saved ?? previousPair(request, ctx) : undefined;
+			// Task mode locks the first physical gear for the whole session branch. Later scores stay
+			// diagnostic: switching model or thinking level would rebuild the provider prompt cache.
+			// Legacy workflow remains the only owner allowed to change the physical pair.
+			const reusable = old?.fallbackReason === "disabled" ? undefined : old;
+			const existingPhase = !settings.workflow.enabled ? validPhaseState(reusable?.phaseRoute) : undefined;
+			let phaseIntent: ReturnType<typeof phaseChoiceIntent>;
+			if (existingPhase && request.reason === "user") {
+				const latest = request.messages.findLast(message => message.role === "user");
+				const text = !latest ? "" : typeof latest.content === "string" ? latest.content : latest.content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n");
+				const requestedIntent = explicitPhaseIntent(text);
+				if (!ctx.hasUI) phaseIntent = requestedIntent;
+				// A plan hint is not evidence that a plan is ready. Ordinary questions must not
+				// trigger a transition dialog merely because the branch is still in plan.
+				else if (requestedIntent && (existingPhase.phase === "plan" || existingPhase.revising || requestedIntent === "revise")) {
+					const choice = await ctx.ui.select(requestedIntent === "implement" ? "确认开始实现？" : "发现计划偏差，如何继续？", [...PHASE_CHOICES]);
+					const freeText = choice === "自己补充" ? await ctx.ui.input("补充你的决定", "开始实现、继续计划，或其他具体要求") : undefined;
+					phaseIntent = phaseChoiceIntent(choice, freeText) ?? explicitRevisionRequest(text);
+				}
+			}
+			const phaseRoute: PhaseRouteState | undefined = existingPhase ?? (!settings.workflow.enabled ? {
+				version: 1, phase: "plan", revising: false, planGear: initialPlanGear(judgment),
+			} : undefined);
+			if (phaseRoute && !existingPhase && !ctx.hasUI) {
+				const content = request.messages.findLast(message => message.role === "user")?.content;
+				const text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n") : "";
+				const intent = explicitPhaseIntent(text);
+				if (intent === "implement") { phaseRoute.phase = "implement"; phaseRoute.implementGear = implementationGear(judgment, phaseRoute.planGear); }
+			}
+			const lockGear: Gear | undefined = !settings.workflow.enabled
+				? phaseRoute ? activeGear(phaseRoute) : reusable?.sessionLock?.gear ?? (reusable?.dispatch ? reusable.gear : undefined)
+				: undefined;
+			const selectedGear = lockGear ?? desired?.gear ?? old?.gear ?? FALLBACK_GEAR;
+			const wanted = selectedGear;
+			// A task-mode phase uses the active gear's configured thinking level, never the score band's level.
+			const thinkingLevel = !settings.workflow.enabled
+				? gearTarget(settings, selectedGear).thinkingLevel
+				: desired?.thinkingLevel ?? old?.dispatch?.thinkingLevel;
+			const retained = !lockGear && !workflow && decision.retainSavedDispatch && old ? saved ?? previousPair(request, ctx) : undefined;
 			const resolved = retained && old ? { ...retained, gear: old.gear, degraded: !!old.fallback && !!judgment }
 				: resolveGear(wanted, request, ctx, settings, thinkingLevel);
+			if (phaseRoute && !existingPhase) phaseRoute.planGear = resolved.gear;
+			if (phaseRoute && phaseIntent === "implement" && phaseRoute.phase === "plan") {
+				phaseRoute.phase = "implement"; phaseRoute.revising = false;
+				phaseRoute.implementGear = implementationGear(judgment, phaseRoute.planGear);
+			} else if (phaseRoute && phaseIntent === "revise" && phaseRoute.phase === "implement") phaseRoute.revising = true;
+			else if (phaseRoute && phaseIntent === "implement" && phaseRoute.revising) phaseRoute.revising = false;
+			const phaseGear = phaseRoute ? activeGear(phaseRoute) : undefined;
+			if (phaseGear && phaseGear !== resolved.gear) {
+				const phaseResolved = resolveGear(phaseGear, request, ctx, settings, gearTarget(settings, phaseGear).thinkingLevel);
+				resolved.model = phaseResolved.model; resolved.thinkingLevel = phaseResolved.thinkingLevel;
+				resolved.gear = phaseResolved.gear; resolved.degraded = phaseResolved.degraded;
+			}
+			const sessionLock = !settings.workflow.enabled ? { version: 1 as const, gear: resolved.gear } : undefined;
 			const fallback = (decision.trace.source !== "inherited" && !judgment) || resolved.degraded;
 			const state: GearState = {
 				gear: resolved.gear,
@@ -499,6 +558,8 @@ export default function (pi: ExtensionAPI) {
 				fallback,
 				...(fallback ? { fallbackReason: judgment ? "target-unavailable" as const : "judge-unavailable" as const } : {}),
 				dispatch: dispatch(resolved),
+				...(sessionLock ? { sessionLock } : {}),
+				...(phaseRoute ? { phaseRoute } : {}),
 				...(id ? { turnId: id } : {}),
 			};
 			if (request.signal?.aborted) {

@@ -40,6 +40,10 @@ export interface GearState {
 	fallbackReason?: "judge-unavailable" | "target-unavailable" | "disabled";
 	/** Actual physical pair, frozen for the turn even if configuration changes. */
 	dispatch?: GearTarget;
+	/** Task-mode session lock. Once present, later turns keep this gear and its configured thinking level. */
+	sessionLock?: { version: 1; gear: Gear };
+	/** Accepted two-phase route. It permits one plan-to-implement switch and never follows a later score. */
+	phaseRoute?: import("./phase-routing.ts").PhaseRouteState;
 	task?: TaskState;
 	workflow?: WorkflowState;
 	/** Display-only bounded explanation; never authorizes a phase transition. */

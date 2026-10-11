@@ -41,13 +41,14 @@ test('real Pi session state survives compaction; new same-text user entry is jud
   h.persist(first);
   h.session.appendCompaction('summary', firstId, 1000);
   const repeated = await h.run();
-  assert.equal(repeated.model.id, 'light');
+  assert.equal(repeated.model.id, 'standard');
   assert.equal(repeated.state, undefined);
   assert.equal(h.calls(), 1);
   // Even identical content and timestamp are distinct requests because entry IDs differ.
   const secondId = h.session.appendMessage(user('same task', 10));
   const second = await h.run();
   assert.equal(second.model.id, 'standard');
+  assert.equal(second.state.sessionLock.gear, 'standard');
   assert.ok(second.state.turnId.startsWith(secondId));
   assert.equal(h.calls(), 2);
 });
@@ -61,7 +62,7 @@ test('tree navigation restores branch verdict and a newly appended task is rejud
   h.persist(await h.run());
   h.session.branch(firstStateId);
   const restored = await h.run();
-  assert.equal(restored.model.id, 'light');
+  assert.equal(restored.model.id, 'standard');
   assert.equal(h.calls(), 2);
   h.session.appendMessage(user('alternate task', 3));
   await h.run();

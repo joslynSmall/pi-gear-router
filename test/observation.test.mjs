@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { isVerificationCommand, verificationCommandKind, registerObservations, branchFacts, OBSERVATION_TYPE } from '../src/observation.ts';
+import { after, test } from 'node:test';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const dir = mkdtempSync(join(tmpdir(), 'pi-gear-observation-test-'));
+process.env.PI_GEAR_ROUTER_DATA_DIR = dir;
+writeFileSync(join(dir, 'settings.json'), JSON.stringify({ routingMode: 'legacy-workflow' }));
+after(() => rmSync(dir, { recursive: true, force: true }));
+const { isVerificationCommand, verificationCommandKind, registerObservations, branchFacts, OBSERVATION_TYPE } = await import('../src/observation.ts');
 import { newWorkflowState, WORKFLOW_EVENT_TYPE } from '../src/workflow-routing.ts';
 test('verification recognizer excludes ambiguous shell chains and arbitrary commands', () => {
   for (const command of ['npm test', 'npm run typecheck && npm test', 'pnpm test --run', 'npx tsc --noEmit']) assert.equal(isVerificationCommand(command), true, command);
