@@ -32,20 +32,11 @@ test('guard injects after the leading system message and only for active gears w
   assert.equal(handler({ messages }, { ...h.ctx, model: { provider: 'test', id: 'manual' } }), undefined);
 });
 
-test('tool guard is fail-closed in planning but does not constrain execution', () => {
-  const planning = setup({ getAllTools: () => [{ name: 'safe', annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }] });
-  const guard = planning.handlers.get('tool_call');
-  assert.equal(guard({ toolName: 'edit', input: {} }, planning.ctx).block, true);
-  assert.equal(guard({ toolName: 'bash', input: { command: 'npm test' } }, planning.ctx).block, true);
-  assert.equal(guard({ toolName: 'bash', input: { command: 'git status --short' } }, planning.ctx), undefined);
-  assert.equal(guard({ toolName: 'read', input: {} }, planning.ctx), undefined);
-  assert.equal(guard({ toolName: 'find', input: {} }, planning.ctx).block, true, 'a same-named custom tool still needs explicit read-only metadata');
-  assert.equal(guard({ toolName: 'safe', input: {} }, planning.ctx), undefined);
-  assert.equal(guard({ toolName: 'unknown', input: {} }, planning.ctx).block, true);
-  const broken = setup({ getAllTools: () => { throw new Error('registry unavailable'); } });
-  assert.equal(broken.handlers.get('tool_call')({ toolName: 'custom', input: {} }, broken.ctx).block, true);
-  const execution = setup({ phase: 'execution' });
-  assert.equal(execution.handlers.get('tool_call')({ toolName: 'edit', input: {} }, execution.ctx), undefined);
+test('workflow phases leave all tool permissions to the host', () => {
+  for (const phase of ['planning', 'recovery', 'execution', 'verification']) {
+    const h = setup({ phase, getAllTools: () => { throw new Error('router must not inspect tool permissions'); } });
+    assert.equal(h.handlers.has('tool_call'), false, phase);
+  }
 });
 
 test('settle handler appends one hidden reminder, then a blocked event without continuation', () => {
@@ -57,6 +48,8 @@ test('settle handler appends one hidden reminder, then a blocked event without c
   assert.equal(reminder.entries[0].data.kind, 'reminder');
   assert.equal(reminder.entries[1].type, 'custom_message');
   assert.equal(reminder.entries[1].display, false);
+  assert.doesNotMatch(reminder.entries[1].content, /read-only|Do not modify files/u);
+  assert.match(reminder.entries[1].content, /Pi.*permissions/u);
   const second = setup({ reminder: true });
   const blocked = second.handlers.get('agent_before_settle')(event, second.ctx);
   assert.equal(blocked.continue, undefined);

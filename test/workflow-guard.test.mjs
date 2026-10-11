@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { defaultSettings } from '../src/gears.ts';
 import { newWorkflowState, workflowPacketDigest } from '../src/workflow-routing.ts';
-import { isReadOnlyShell, shouldRemind, workflowInstruction } from '../src/workflow-guard.ts';
+import { shouldRemind, workflowInstruction } from '../src/workflow-guard.ts';
 
 const settings = () => ({ ...defaultSettings(), workflow: { ...defaultSettings().workflow, enabled: true } });
 const state = (overrides = {}) => newWorkflowState({
@@ -10,18 +10,17 @@ const state = (overrides = {}) => newWorkflowState({
   policyFingerprint: 'a'.repeat(64), requestedBand: 3, ...overrides,
 });
 
-test('read-only shell grammar accepts only a narrow independently read-only subset', () => {
-  for (const command of ['pwd', 'pwd -P', 'ls', 'ls -lah src', 'find src test', 'rg -n workflow src', 'grep -R workflow src', 'git status --short', 'git diff --stat', 'git log --oneline', 'git show --stat']) {
-    assert.equal(isReadOnlyShell(command), true, command);
-  }
-  for (const command of ['find . -exec rm {} \\;', 'find . -delete', 'ls; rm -rf .', 'rg x src | tee out', 'git reset --hard', 'git diff --output=x', 'npm test', 'echo $(pwd)', 'grep x src > out', 'ls --color=always']) {
-    assert.equal(isReadOnlyShell(command), false, command);
+test('planning and recovery instructions are hints, not tool permission policies', () => {
+  for (const planning of [state(), state({ objective: 'plan_only' }), state({ objective: 'research_only' }), state({ phase: 'recovery' })]) {
+    const instruction = workflowInstruction(planning);
+    assert.match(instruction, /Pi.*permissions/u);
+    assert.doesNotMatch(instruction, /read-only|Do not modify files|execution phase is authorized/u);
   }
 });
 
 test('phase instruction is stable, phase-specific, and packet-bound', () => {
   const planning = state();
-  assert.match(workflowInstruction(planning), /planning.*read-only/su);
+  assert.match(workflowInstruction(planning), /Phase: planning/u);
   const packet = {
     kind: 'execution', goal: 'Implement it', nonGoals: ['No schema change'], decisions: [{ decision: 'Use event', rationale: 'Replayable' }],
     steps: [{ id: '1', scope: ['src/index.ts'], change: 'route', acceptance: ['tests pass'] }], constraints: ['keep sticky'], validation: ['npm test'], risks: ['bad switch'], blockingUnknowns: [],

@@ -1,5 +1,7 @@
 # Observer 路由验证记录
 
+> 历史记录说明：下文的只读 tool guard 验证描述当时实现，不代表当前权限策略。现已按用户确认移除 task 计划／修订与 legacy planning／recovery 的工具拦截及 shell 白名单；阶段仅提示工作重点，所有工具权限交给 Pi 及已有权限扩展。路由交接、验证事实与有界 reminder 保留。
+
 ## 状态与证据边界
 
 需求、设计、任务已批准；observer 为显式 opt-in，默认仍为 task。此记录描述本次实现，不把早期 seam 探针、旧 workflow 联网报告或可行性对照当作新功能验收。

@@ -1,5 +1,7 @@
 # 阶段编排模型路由验证记录
 
+> 历史记录说明：下文的只读 tool guard 验证描述当时实现，不代表当前权限策略。现已按用户确认移除 task 计划／修订与 legacy planning／recovery 的工具拦截及 shell 白名单；阶段仅提示工作重点，所有工具权限交给 Pi 及已有权限扩展。路由交接、验证事实与有界 reminder 保留。
+
 日期：2026-10-11  
 范围：`phase-orchestrated-routing` 的离线实现验证，以及一次隔离、受限的真实 Jev/Magpie protocol smoke。
 
