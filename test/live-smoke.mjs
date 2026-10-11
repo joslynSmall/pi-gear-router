@@ -22,13 +22,12 @@ try {
   // Credential refresh writes only to this temporary copy; personal files are untouched.
   const authPath = join(temporary, 'auth.json');
   if (existsSync(join(agentDir, 'auth.json'))) copyFileSync(join(agentDir, 'auth.json'), authPath);
-  const config = JSON.parse(readFileSync(join(agentDir, 'pi-gear-router', 'settings.json'), 'utf8'));
-  assert.notEqual(config.enabled, false, 'Live verification requires enabled routing');
   copyFileSync(join(agentDir, 'pi-gear-router', 'settings.json'), join(temporary, 'settings.json'));
   process.env.PI_GEAR_ROUTER_DATA_DIR = temporary;
   const { default: router } = await import('../src/index.ts');
   const { loadSettings } = await import('../src/settings.ts');
   const settings = loadSettings();
+  assert.notEqual(settings.enabled, false, 'Live verification requires enabled routing');
   report.configuration = { gearBias: settings.gearBias, judgeTimeoutMs: settings.judgeTimeoutMs, gears: settings.gears, taskRouting: settings.taskRouting };
   const runtime = await ModelRuntime.create({
     authPath, modelsPath: join(agentDir, 'models.json'), modelsStorePath: join(temporary, 'models-cache.json'),
