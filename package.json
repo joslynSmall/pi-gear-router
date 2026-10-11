@@ -1,7 +1,7 @@
 {
   "name": "pi-gear-router",
-  "version": "0.1.0",
-  "description": "Three-gear per-turn model routing for Pi, judged by TypeSafe Jev",
+  "version": "0.2.0",
+  "description": "User-controlled plan/implement model routing for Pi, judged by TypeSafe Jev",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -15,8 +15,7 @@
     "pi-coding-agent",
     "model-routing",
     "jev",
-    "typesafe",
-    "cost-optimization"
+    "typesafe"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -24,8 +23,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.1.0",
-    "typescript": "^6.0.3",
-    "zod": "^4.6.5"
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.1.0"

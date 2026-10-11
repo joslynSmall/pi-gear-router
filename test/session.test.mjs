@@ -4,108 +4,43 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { SessionManager, VIRTUAL_MODEL_STATE_ENTRY } from '@earendil-works/pi-coding-agent';
-
-const dir = mkdtempSync(join(tmpdir(), 'pi-gear-session-'));
-process.env.PI_GEAR_ROUTER_DATA_DIR = dir;
-const { default: extension } = await import('../src/index.ts');
-after(() => rmSync(dir, { recursive: true, force: true }));
-const user = (text, timestamp) => ({ role: 'user', content: text, timestamp });
-
-function setup(session = SessionManager.inMemory(), scores = [.2, 1], relation = 'new_task') {
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ gears: Object.fromEntries(
-    ['light', 'standard', 'heavy'].map((gear) => [gear, { provider: 'test', model: gear, thinkingLevel: 'low' }]),
-  ) }));
-  let route;
-  const handlers = new Map();
-  let calls = 0;
-  extension({ on: (name, handler) => { const previous = handlers.get(name); handlers.set(name, (...args) => { previous?.(...args); return handler(...args); }); }, appendEntry: (type, data) => session.appendCustomEntry(type, data), registerVirtualModel: (definition) => { route = definition.route; } });
-  const ctx = { mode: 'print', model: { provider: 'gears', id: 'auto' }, sessionManager: session, modelRegistry: {
-    find: (_provider, id) => ({ provider: 'test', id, api: 'openai-responses', reasoning: true }),
-    hasConfiguredAuth: () => true,
-    getModelOfType: () => ({}),
-    classify: async () => { calls++; return { stopReason: 'stop', answers: { gear: { type: 'score', score: scores[Math.min(calls - 1, scores.length - 1)], confidence: 0.9 }, relation: { type: 'choice', choice: relation, confidence: .99, probabilities: Object.fromEntries(['new_task', 'same_task', 'uncertain'].map(k => [k, k === relation ? .98 : .01])) } } }; },
-  } };
-  const run = (reason = 'user', previous) => {
-    const state = session.getBranch().findLast((entry) => entry.type === 'custom' && entry.customType === VIRTUAL_MODEL_STATE_ENTRY)?.data.state;
-    return route({ reason, thinkingLevel: 'high', state, messages: session.buildSessionProjection().messages, previous }, ctx);
-  };
-  const persist = (result) => session.appendCustomEntry(VIRTUAL_MODEL_STATE_ENTRY, { provider: 'gears', modelId: 'auto', state: result.state });
-  return { session, run, persist, calls: () => calls, handlers, ctx };
+const dir=mkdtempSync(join(tmpdir(),'gear-session-'));
+process.env.PI_GEAR_ROUTER_DATA_DIR=dir;
+const {default:extension}=await import('../src/index.ts');
+after(()=>rmSync(dir,{recursive:true,force:true}));
+const user=(content,timestamp)=>({role:'user',content,timestamp});
+function setup(session=SessionManager.inMemory(dir)) {
+  writeFileSync(join(dir,'settings.json'),JSON.stringify({gears:Object.fromEntries(['light','standard','heavy'].map(g=>[g,{provider:'offline',model:g,thinkingLevel:'low'}]))}));
+  let route,n=0;const commands=new Map();
+  extension({on:()=>{},registerCommand:(name,cmd)=>commands.set(name,cmd),appendEntry:(type,data)=>session.appendCustomEntry(type,data),registerVirtualModel:d=>{route=d.route;}});
+  const ctx={cwd:dir,mode:'print',hasUI:false,model:{provider:'gears',id:'auto'},sessionManager:session,ui:{notify:()=>{}},
+    modelRegistry:{find:(_p,id)=>({provider:'offline',id,api:'openai-responses',reasoning:true}),hasConfiguredAuth:()=>true,getModelOfType:()=>({}),
+      classify:async()=>({stopReason:'stop',answers:{gear:{type:'score',score:++n===1?1.9:1,confidence:.9}},usage:{input:10}})}};
+  const state=()=>session.getBranch().findLast(e=>e.type==='custom'&&e.customType===VIRTUAL_MODEL_STATE_ENTRY)?.data.state;
+  const run=async()=>{const r=await route({reason:'user',thinkingLevel:'high',state:state(),messages:session.buildSessionProjection().messages},ctx);if(r.state)session.appendCustomEntry(VIRTUAL_MODEL_STATE_ENTRY,{provider:'gears',modelId:'auto',state:r.state});return r;};
+  return {session,run,state,calls:()=>n,command:p=>commands.get('gear-phase').handler(p,ctx)};
 }
-
-test('real Pi session state survives compaction; new same-text user entry is judged', async () => {
-  const h = setup();
-  const firstId = h.session.appendMessage(user('same task', 10));
-  const first = await h.run();
-  assert.ok(first.state.turnId.startsWith(firstId));
-  h.persist(first);
-  h.session.appendCompaction('summary', firstId, 1000);
-  const repeated = await h.run();
-  assert.equal(repeated.model.id, 'standard');
-  assert.equal(repeated.state, undefined);
-  assert.equal(h.calls(), 1);
-  // Even identical content and timestamp are distinct requests because entry IDs differ.
-  const secondId = h.session.appendMessage(user('same task', 10));
-  const second = await h.run();
-  assert.equal(second.model.id, 'standard');
-  assert.equal(second.state.sessionLock.gear, 'standard');
-  assert.ok(second.state.turnId.startsWith(secondId));
-  assert.equal(h.calls(), 2);
+test('phase survives real SessionManager compaction and ordinary new messages without rejudgment',async()=>{
+  const h=setup();const first=h.session.appendMessage(user('complex design',1));await h.run();
+  h.session.appendCompaction('summary',first,1000);h.session.appendMessage(user('继续',2));
+  assert.equal((await h.run()).model.id,'heavy');assert.equal(h.calls(),1);
+  await h.command('implement');h.session.appendMessage(user('继续',3));assert.equal((await h.run()).model.id,'standard');assert.equal(h.calls(),2);
 });
-
-test('tree navigation restores branch verdict and a newly appended task is rejudged', async () => {
-  const h = setup();
-  h.session.appendMessage(user('first', 1));
-  const first = await h.run();
-  const firstStateId = h.persist(first);
-  h.session.appendMessage(user('second', 2));
-  h.persist(await h.run());
-  h.session.branch(firstStateId);
-  const restored = await h.run();
-  assert.equal(restored.model.id, 'standard');
-  assert.equal(h.calls(), 2);
-  h.session.appendMessage(user('alternate task', 3));
-  await h.run();
-  assert.equal(h.calls(), 3);
+test('tree navigation isolates pending phase commands and restores original phase/gear',async()=>{
+  const h=setup();h.session.appendMessage(user('complex design',1));await h.run();const root=h.session.getLeafId();
+  await h.command('implement');h.session.appendMessage(user('继续',2));await h.run();assert.equal(h.state().phase,'implement');
+  h.session.branch(root);h.session.appendMessage(user('另一条分支',3));await h.run();
+  assert.equal(h.state().phase,'plan');assert.equal(h.state().gear,'heavy');assert.equal(h.calls(),2);
 });
-
-test('persisted task restores after reopen, fork and compaction without cross-branch leakage', async () => {
-  const h = setup(SessionManager.create(dir, join(dir, 'sessions')), [1.92, .2]);
-  const userId = h.session.appendMessage(user('Analyze payment races', 1));
-  const first = await h.run(); const originalId = h.persist(first);
-  const taskId = first.state.task.taskId;
-  h.session.appendMessage(user('Independent title edit', 2));
-  h.persist(await h.run());
-  // Separate physical JSONL session containing only the original task branch.
-  const forkPath = h.session.createBranchedSession(originalId);
-  assert.ok(forkPath);
-  const fork = setup(SessionManager.open(forkPath), [1.9], 'same_task');
-  fork.session.appendCompaction('bounded summary', userId, 1000);
-  fork.session.appendMessage(user('继续', 3));
-  const inherited = await fork.run(); fork.persist(inherited);
-  assert.equal(inherited.state.task.taskId, taskId); assert.equal(inherited.state.decision.source, 'inherited');
-  assert.equal(fork.calls(), 0); assert.equal(inherited.state.task.inheritedTurns, 1);
-  const reopened = setup(SessionManager.open(fork.session.getSessionFile()), [1.9], 'same_task');
-  reopened.session.appendMessage(user('继续', 4));
-  const restored = await reopened.run();
-  assert.equal(restored.state.task.taskId, taskId); assert.equal(restored.state.task.inheritedTurns, 2); assert.equal(reopened.calls(), 0);
-  reopened.persist(restored);
-  const crossCwd = setup(SessionManager.forkFrom(reopened.session.getSessionFile(), join(dir, 'other'), join(dir, 'forks')), [1.9], 'same_task');
-  crossCwd.session.appendMessage(user('继续', 5));
-  const forked = await crossCwd.run();
-  assert.equal(forked.state.task.taskId, taskId); assert.equal(forked.state.task.inheritedTurns, 3); assert.equal(crossCwd.calls(), 0);
-});
-
-test('tree selection restores task counter and marker is consumed only on its branch', async () => {
-  const h = setup(SessionManager.inMemory(), [1.92, 1.9], 'same_task');
-  h.session.appendMessage(user('Complex task', 1));
-  const first = await h.run(); const root = h.persist(first);
-  h.handlers.get('tool_result')({ toolName: 'bash', input: { command: 'npm test' }, structuredContent: { exit_code: 1 }, isError: true }, h.ctx);
-  h.session.appendMessage(user('继续', 2));
-  const reviewed = await h.run(); h.persist(reviewed);
-  assert.equal(reviewed.state.decision.trigger, 'verification-failed'); assert.equal(h.calls(), 2);
-  h.session.branch(root);
-  h.session.appendMessage(user('继续', 3));
-  const alternate = await h.run();
-  assert.equal(alternate.state.decision.source, 'inherited'); assert.equal(alternate.state.task.inheritedTurns, 1); assert.equal(h.calls(), 2);
+test('reopen and branched-session restore phase and consumed command without classifier call',async()=>{
+  const h=setup(SessionManager.create(dir,join(dir,'sessions')));
+  h.session.appendMessage(user('complex design',1));await h.run();await h.command('implement');h.session.appendMessage(user('执行',2));await h.run();
+  // A real response causes the SessionManager to flush its buffered session entries to disk.
+  h.session.appendMessage({role:'assistant',content:[{type:'text',text:'done'}],api:'openai-responses',provider:'offline',model:'standard',stopReason:'stop',timestamp:3,
+    usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}});
+  const reopened=setup(SessionManager.open(h.session.getSessionFile()));reopened.session.appendMessage(user('继续',4));
+  assert.equal((await reopened.run()).model.id,'standard');assert.equal(reopened.calls(),0);assert.equal(reopened.state().phase,'implement');
+  const forkPath=h.session.createBranchedSession(h.session.getLeafId());assert.ok(forkPath);
+  const fork=setup(SessionManager.open(forkPath));fork.session.appendMessage(user('继续',5));
+  assert.equal((await fork.run()).model.id,'standard');assert.equal(fork.calls(),0);
 });

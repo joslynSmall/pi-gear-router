@@ -1,73 +1,48 @@
-import type { Gear, GearJudgment } from "./types.ts";
+import { validTarget } from "./settings.ts";
+import type { Gear, GearJudgment, RouterState } from "./types.ts";
 
-export type RoutingPhase = "plan" | "implement";
-export interface PhaseRouteState {
-	version: 1;
-	phase: RoutingPhase;
-	revising: boolean;
-	/** The model/thinking pair selected for plan and kept until the one allowed switch. */
-	planGear: Gear;
-	/** The model/thinking pair selected once for implementation. */
-	implementGear?: Gear;
-}
-
-const EXPLICIT_IMPLEMENT = /(?:开始实现|按这个(?:计划)?(?:做|实现)|批准(?:当前)?计划|implement(?: the)?|start implementing|approve(?: the)? plan)/iu;
-const EXPLICIT_REVISION = /(?:先停|计划有(?:问题|遗漏|偏差)|stop and revise|plan is wrong)/iu;
-const PLAN_SKILLS = /(?:requirement|spec|research|explor|plan|design|需求|调研|探索|计划|设计)/iu;
-const IMPLEMENT_SKILLS = /(?:implement|verif|test|debug|执行|实现|验证|测试)/iu;
-
-/** A bounded binary judgment. The caller supplies the classifier result; this never invents one. */
-export type PhaseChoice = "开始实现" | "继续计划" | "自己补充";
-export const PHASE_CHOICES = ["开始实现", "继续计划", "自己补充"] as const;
-
-/** A clicked choice is explicit. Free text must itself contain an explicit intent; blank and cancellation do not. */
-export function phaseChoiceIntent(choice: string | undefined, freeText?: string): "implement" | "revise" | "stay" | undefined {
-	if (choice === "开始实现") return "implement";
-	if (choice === "继续计划") return "stay";
-	if (choice === "自己补充") return explicitPhaseIntent(freeText ?? "") ?? "stay";
-	if (choice !== undefined) return;
-	return explicitPhaseIntent(freeText ?? "");
-}
-
-export function explicitPhaseIntent(text: string): "implement" | "revise" | undefined {
-	if (typeof text !== "string") return;
-	const value = text.trim();
-	if (!value || value.length > 500) return;
-	if (EXPLICIT_IMPLEMENT.test(value)) return "implement";
-	if (EXPLICIT_REVISION.test(value)) return "revise";
-}
-
-/** Plan starts on heavy unless the first verdict is confidently ordinary. */
-export function initialPlanGear(judgment: GearJudgment | undefined): Gear {
+export function initialPlanGear(judgment?: GearJudgment): Gear {
 	return judgment && judgment.confidence >= 0.8 && judgment.score < 1.5 ? "standard" : "heavy";
 }
-
-/** Implementation uses the lower-thinking gear unless the work remains confidently hard. */
 export function implementationGear(judgment: GearJudgment | undefined, planGear: Gear): Gear {
 	return judgment && judgment.confidence >= 0.8 && judgment.score >= 1.5 ? planGear : "standard";
 }
+export const activeGear = (state: RouterState): Gear => state.phase === "implement" ? state.implementGear! : state.planGear;
 
-export function activeGear(state: PhaseRouteState): Gear {
-	return state.phase === "implement" && state.implementGear ? state.implementGear : state.planGear;
+/** Only a dialog candidate, never approval. The UI still must confirm ambiguous phrases. */
+export function implementationHint(text: string): boolean {
+	const match = /(?:开始实现|确认需求|需求已确认|按(?:这个)?(?:计划|方案)(?:做|实现)|批准(?:当前)?计划|start implementing|go ahead and implement|approve(?: the)? plan)/iu.exec(text);
+	if (!match) return false;
+	const before = text.slice(Math.max(0, match.index - 24), match.index).split(/[，。；,.!?\n]/u).at(-1) ?? "";
+	return !/(?:不|无需|别|don[’']t|do not|not yet|never)/iu.test(before);
 }
 
-/** Recommendation category follows routing hints, not tool permissions or the model's prose. */
-export function skillCategory(state: PhaseRouteState): "plan" | "implement" {
-	return state.phase === "plan" || state.revising ? "plan" : "implement";
-}
+const gear = (v: unknown): v is Gear => v === "light" || v === "standard" || v === "heavy";
+const text = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const judgment = (v: unknown): v is GearJudgment => {
+	if (!v || typeof v !== "object") return false;
+	const j = v as GearJudgment;
+	return Number.isFinite(j.score) && j.score >= 0 && j.score <= 2 && Number.isFinite(j.confidence) && j.confidence >= 0 && j.confidence <= 1
+		&& Number.isFinite(j.inputTokens) && j.inputTokens >= 0;
+};
 
-export function skillMatchesPhase(name: string, description: string, category: "plan" | "implement"): boolean {
-	const text = `${name} ${description}`;
-	return category === "plan" ? PLAN_SKILLS.test(text) && !IMPLEMENT_SKILLS.test(text) : IMPLEMENT_SKILLS.test(text);
-}
-
-export function validPhaseState(value: unknown): PhaseRouteState | undefined {
+/** Old task two-phase state can preserve its phase; observer/workflow cannot be reinterpreted. */
+export function parseState(value: unknown): RouterState | undefined {
 	if (!value || typeof value !== "object") return;
-	const state = value as Partial<PhaseRouteState>;
-	const gear = (item: unknown): item is Gear => item === "light" || item === "standard" || item === "heavy";
-	if (state.version !== 1 || (state.phase !== "plan" && state.phase !== "implement") || typeof state.revising !== "boolean" || !gear(state.planGear)) return;
-	if (state.implementGear !== undefined && !gear(state.implementGear)) return;
-	if (state.phase === "implement" && !state.implementGear) return;
-	if (state.phase === "plan" && state.revising) return;
-	return { version: 1, phase: state.phase, revising: state.revising, planGear: state.planGear, ...(state.implementGear ? { implementGear: state.implementGear } : {}) };
+	const raw = value as Record<string, unknown>;
+	if (raw.version !== undefined && raw.version !== 2) return;
+	const p = raw.version === 2 ? raw : raw.phaseRoute as Record<string, unknown> | undefined;
+	if (!p || (raw.version !== 2 && p.version !== 1) || (p.phase !== "plan" && p.phase !== "implement") || !gear(p.planGear)
+		|| (p.implementGear !== undefined && !gear(p.implementGear)) || (p.phase === "implement" && !gear(p.implementGear))) return;
+	if (!gear(raw.gear) || (raw.dispatch !== undefined && !validTarget(raw.dispatch))) return;
+	return {
+		version: 2, phase: p.phase, planGear: p.planGear, gear: raw.gear, fallback: raw.fallback === true,
+		...(gear(p.implementGear) ? { implementGear: p.implementGear } : {}),
+		...(validTarget(raw.dispatch) ? { dispatch: { provider: raw.dispatch.provider, model: raw.dispatch.model, thinkingLevel: raw.dispatch.thinkingLevel } } : {}),
+		...(text(raw.configKey) ? { configKey: raw.configKey } : {}),
+		...(text(raw.turnKey) ? { turnKey: raw.turnKey } : {}),
+		...(text(raw.phaseEntryId) ? { phaseEntryId: raw.phaseEntryId } : {}),
+		...(judgment(raw.judgment) ? { judgment: { score: raw.judgment.score, confidence: raw.judgment.confidence, inputTokens: raw.judgment.inputTokens } } : {}),
+		...(raw.judgeFailed === true ? { judgeFailed: true } : {}),
+	};
 }

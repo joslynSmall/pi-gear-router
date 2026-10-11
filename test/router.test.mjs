@@ -4,408 +4,212 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
-const dir = mkdtempSync(join(tmpdir(), 'pi-gear-router-test-'));
+const dir = mkdtempSync(join(tmpdir(), 'gear-router-'));
 process.env.PI_GEAR_ROUTER_DATA_DIR = dir;
 const { default: extension } = await import('../src/index.ts');
 after(() => rmSync(dir, { recursive: true, force: true }));
-
-const model = (id) => ({ provider: 'test', id, api: 'openai-responses', reasoning: true, thinkingLevelMap: { off: 'off', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' } });
-const user = (text, timestamp = 1) => ({ role: 'user', content: text, timestamp });
-
-function harness(scores = [0.2, 1, 1.8]) {
-  const targets = Object.fromEntries(['light', 'standard', 'heavy'].map((gear) => [gear, { provider: 'test', model: gear, thinkingLevel: gear === 'light' ? 'low' : gear === 'standard' ? 'medium' : 'high' }]));
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ gears: targets }));
-  let route;
-  const handlers = new Map();
-  extension({
-    on(event, handler) { handlers.set(event, handler); return () => handlers.delete(event); },
-    appendEntry(customType, data) { entries.push({ type: 'custom', id: `custom-${entries.length}`, customType, data }); },
-    registerVirtualModel(definition) { route = definition.route; },
-  });
-  const statuses = [];
-  const calls = [];
-  const unavailable = new Set();
-  const noAuth = new Set();
-  const entries = [];
-  const ctx = {
-    mode: 'tui',
-    model: { provider: 'gears', id: 'auto' },
-    ui: { theme: { fg: (_color, text) => text }, setStatus: (key, text) => statuses.push({ key, text }) },
-    sessionManager: { getBranch: () => entries, buildSessionProjection() { throw new Error('Judge must use routed messages'); } },
-    modelRegistry: {
-      find: (_provider, id) => unavailable.has(id) ? undefined : model(id),
-      hasConfiguredAuth: (m) => !noAuth.has(m.id),
-      getModelOfType: () => ({ id: 'jev-latest' }),
-      async classify(_model, input) {
-        calls.push(input);
-        const score = scores[Math.min(calls.length - 1, scores.length - 1)];
-        if (score === null) return { stopReason: 'error', answers: {} };
-        return { stopReason: 'stop', answers: { gear: { type: 'score', score, confidence: 0.9 }, relation: { type: 'choice', choice: 'new_task', probabilities: { same_task: .02, new_task: .96, uncertain: .02 }, confidence: .96 } }, usage: { input: 42 } };
-      },
-    },
+const physical = id => ({ provider: 'offline', id, api: 'openai-responses', reasoning: true,
+  thinkingLevelMap: { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' } });
+const user = (content, timestamp = 1) => ({ role: 'user', content, timestamp });
+function harness(verdicts = [{ score: 1.9, confidence: .9 }], config = {}) {
+  const gears = Object.fromEntries(['light', 'standard', 'heavy'].map(g => [g, { provider: 'offline', model: g, thinkingLevel: g === 'heavy' ? 'high' : g === 'standard' ? 'medium' : 'low' }]));
+  const settings = { gears, ...config };
+  const save = () => writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings)); save();
+  let route, state, clock = 0;
+  const handlers = new Map(), commands = new Map(), branch = [], calls = [], statuses = [], notifications = [], dialogs = [], missing = new Set(), noAuth = new Set();
+  extension({ on: (name, fn) => handlers.set(name, fn), registerCommand: (name, fn) => commands.set(name, fn),
+    appendEntry: (customType, data) => branch.push({ type: 'custom', id: `entry-${++clock}`, customType, data }),
+    registerVirtualModel: definition => { route = definition.route; } });
+  const ctx = { cwd: dir, mode: 'tui', hasUI: true, model: { provider: 'gears', id: 'auto' }, isProjectTrusted: () => false,
+    ui: { theme: { fg: (_tone, text) => text }, setStatus: (_key, text) => statuses.push(text), notify: (text, tone) => notifications.push({ text, tone }),
+      confirm: async (...args) => { dialogs.push(args); return true; } }, sessionManager: { getBranch: () => branch },
+    modelRegistry: { find: (_provider, id) => missing.has(id) ? undefined : physical(id), hasConfiguredAuth: model => !noAuth.has(model.id),
+      getModelOfType: () => ({}), classify: async (_m, input, options) => { calls.push({ input, options }); const v = verdicts[Math.min(calls.length - 1, verdicts.length - 1)];
+        return v ? { stopReason: 'stop', answers: { gear: { type: 'score', ...v } }, usage: { input: 42 } } : { stopReason: 'error', answers: {} }; } },
   };
-  const run = (overrides = {}) => route({ reason: 'user', thinkingLevel: 'xhigh', messages: [user('task')], ...overrides }, ctx);
-  return { run, calls, targets, unavailable, noAuth, ctx, entries, statuses, handlers };
-}
-
-test('plan and revision retain routing hints without registering tool permission guards', async () => {
-  for (const revising of [false, true]) {
-    const h = harness([1.8]);
-    const first = await h.run();
-    const phaseRoute = revising
-      ? { ...first.state.phaseRoute, phase: 'implement', implementGear: 'standard', revising: true }
-      : first.state.phaseRoute;
-    h.entries.push({ type: 'custom', id: 'route-state', customType: 'pi.virtual-model-state',
-      data: { provider: 'gears', modelId: 'auto', state: { ...first.state, phaseRoute } } });
-    const permissionHandler = h.handlers.get('tool_call');
-    for (const event of [
-      { toolName: 'bash', input: { command: "pwd; rg --files -g '*.ts' | head -100" } },
-      { toolName: 'tool_search', input: { query: 'read file' } },
-      { toolName: 'edit', input: {} },
-      { toolName: 'write', input: {} },
-      { toolName: 'unknown_mcp_tool', input: {} },
-    ]) assert.equal(await permissionHandler?.(event, h.ctx), undefined, event.toolName);
-    assert.equal(h.handlers.has('tool_call'), false, 'router must not own tool permissions');
-    assert.equal(first.state.phaseRoute.phase, 'plan');
-    assert.match(h.statuses.at(-1).text, /路由 计划/u);
-  }
-});
-
-test('ordinary TUI questions never prompt for an implementation phase transition', async () => {
-  const h = harness([1.8]);
-  const prompts = [];
-  h.ctx.hasUI = true;
-  h.ctx.ui.select = async (title) => { prompts.push(title); return '继续计划'; };
-  let state = (await h.run()).state;
-  for (const [index, text] of [
-    '本项目是为了解决什么实际需求产生的',
-    '这个任务感知的 Skill 提醒器现在生效了吗',
-    '解释一下当前结论',
-    '继续',
-  ].entries()) {
-    const result = await h.run({ state, messages: [user(text, index + 2)] });
-    assert.equal(prompts.length, 0, `ordinary question must not prompt: ${text}`);
-    assert.equal(result.state.phaseRoute.phase, 'plan');
-    assert.equal(result.model.id, 'heavy');
-    state = result.state;
-  }
-});
-
-test('explicit TUI phase requests preserve cancellation, one switch, and revision confirmation', async () => {
-  const h = harness([1.8, .8]);
-  const prompts = [];
-  let choice;
-  h.ctx.hasUI = true;
-  h.ctx.ui.select = async (title) => { prompts.push(title); return choice; };
-  let state = (await h.run()).state;
-  let timestamp = 2;
-  const next = async (text) => {
-    const result = await h.run({ state, messages: [user(text, timestamp++)] });
-    state = result.state;
+  const run = async (text = 'task', options = {}) => {
+    const messages = options.messages ?? [user(text, ++clock)];
+    const result = await route({ reason: 'user', state, thinkingLevel: 'xhigh', messages, ...options }, ctx);
+    if (result.state) { state = result.state; branch.push({ type: 'custom', id: `state-${++clock}`, customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state } }); }
     return result;
   };
-  await next('开始实现');
-  assert.equal(prompts.length, 1);
-  assert.equal(state.phaseRoute.phase, 'plan', 'cancel must not switch');
-  choice = '继续计划';
-  await next('批准当前计划');
-  assert.equal(state.phaseRoute.phase, 'plan', 'stay must not switch');
-  choice = '开始实现';
-  const implemented = await next('开始实现');
-  assert.equal(state.phaseRoute.phase, 'implement');
-  assert.equal(implemented.model.id, 'standard');
-  assert.equal(implemented.thinkingLevel, 'medium');
-  assert.equal(prompts.length, 3);
-  await next('开始实现');
-  assert.equal(prompts.length, 3, 'already implementing must not prompt again');
-  choice = undefined;
-  await next('计划有遗漏');
-  assert.equal(state.phaseRoute.revising, true);
-  assert.equal(state.phaseRoute.implementGear, 'standard');
-  await next('解释一下当前结论');
-  assert.equal(prompts.length, 4, 'ordinary revision questions must not prompt');
-  choice = '开始实现';
-  await next('开始实现');
-  assert.equal(prompts.length, 5);
-  assert.equal(state.phaseRoute.revising, false);
-  assert.equal(state.phaseRoute.implementGear, 'standard');
-});
+  return { run, route: (r) => route(r, ctx), ctx, commands, handlers, branch, calls, statuses, notifications, dialogs, missing, noAuth, settings, save, state: () => state };
+}
 
-test('the first score selects a session gear; later scores cannot switch model or thinking', async () => {
-  const h = harness([0.2, 1, 1.8, 0.1]);
-  let state;
-  for (const [index, score] of [0.2, 1, 1.8, 0.1].entries()) {
-    const result = await h.run({ state, messages: [user(`task ${index}`, index + 1)] });
-    assert.equal(result.model.id, 'standard');
-    assert.equal(result.thinkingLevel, 'medium');
-    assert.equal(result.state.sessionLock.gear, 'standard');
-    assert.equal(result.state.score, score);
-    state = result.state;
-  }
-  assert.equal(h.calls.length, 4);
-  assert.equal(h.calls[3].state.request, 'task 3');
-});
-
-test('same turn repeated user routing reuses decision after transcript length changes', async () => {
+test('only first plan turn is judged; unrelated tasks and continuation text keep the pair', async () => {
   const h = harness();
-  h.entries.push({ type: 'message', id: 'user-1', message: user('task') });
-  const first = await h.run();
-  const second = await h.run({ state: first.state, messages: [{ role: 'system', content: 'compacted', timestamp: 0 }, user('task')] });
-  assert.equal(second.model.id, first.model.id);
+  assert.equal((await h.run()).model.id, 'heavy');
+  for (const text of ['继续', '解释一下', '独立简单改名', '新需求很困难']) assert.equal((await h.run(text)).model.id, 'heavy');
   assert.equal(h.calls.length, 1);
+  assert.equal(h.state().dispatch.thinkingLevel, 'high');
+  assert.equal(h.calls[0].input.state.phase, 'plan');
+  assert.deepEqual(Object.keys(h.calls[0].input.questions), ['gear']);
 });
 
-test('session thinking follows the locked gear, not the score band or Pi manual selection', async () => {
-  const h = harness([1.9]);
-  const result = await h.run({ thinkingLevel: 'max' });
-  assert.equal(result.model.id, 'heavy');
-  assert.equal(result.thinkingLevel, 'high');
-  const next = await h.run({ state: result.state, thinkingLevel: 'off', messages: [user('another task', 2)] });
-  assert.equal(next.model.id, 'heavy');
-  assert.equal(next.thinkingLevel, 'high');
-  assert.equal(h.calls.length, 2);
-});
-
-test('continuations and retries preserve actual physical pair, not changed settings', async () => {
-  const h = harness([1.9]);
-  const first = await h.run();
-  assert.equal(first.thinkingLevel, 'high');
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ gears: { heavy: { ...h.targets.heavy, model: 'changed', thinkingLevel: 'low' } } }));
-  const previous = { model: first.model, thinkingLevel: 'high' };
-  const next = await h.run({ reason: 'continuation', state: first.state, previous });
-  const retry = await h.run({ reason: 'retry', state: first.state, failed: { ...previous, message: {} } });
-  assert.equal(next.model.id, 'heavy');
-  assert.equal(retry.model.id, 'heavy');
-  assert.equal(next.thinkingLevel, 'high');
-  assert.equal(retry.thinkingLevel, 'high');
-  assert.equal(h.calls.length, 1);
-});
-
-test('failed judgment stores fallback once; next user turn tries Jev again without leaving the lock', async () => {
-  const h = harness([null, 0.2]);
-  const first = await h.run();
-  assert.equal(first.model.id, 'heavy');
-  assert.equal(first.state.fallback, true);
-  assert.equal(first.state.decision.judgeFailure, 'classify-error');
-  await h.run({ reason: 'continuation', state: first.state });
-  await h.run({ reason: 'retry', state: first.state });
-  assert.equal(h.calls.length, 1);
-  const next = await h.run({ state: first.state, messages: [user('new task', 2)] });
-  assert.equal(next.model.id, 'heavy');
-  assert.equal(next.state.sessionLock.gear, 'heavy');
-  assert.equal(h.calls.length, 2);
-});
-
-test('direct calls never classify or return state and use the session gear', async () => {
-  const h = harness([1.9]);
-  const first = await h.run();
-  const result = await h.run({ reason: 'direct', state: first.state });
-  assert.equal(result.model.id, 'heavy');
-  assert.equal(result.thinkingLevel, 'high');
-  assert.equal(result.state, undefined);
-  const fresh = await h.run({ reason: 'direct' });
-  assert.equal(fresh.model.id, 'standard');
-  assert.equal(h.calls.length, 1);
-});
-
-test('missing target and unauthenticated target use available standard and record actual gear', async () => {
-  for (const failure of ['unavailable', 'noAuth']) {
-    const h = harness([1.8]);
-    h[failure].add('heavy');
-    const result = await h.run();
-    assert.equal(result.model.id, 'standard');
-    assert.equal(result.state.gear, 'standard');
-    assert.equal(result.state.fallback, true);
+test('confidently ordinary plan uses standard; low confidence and Jev failure use heavy', async () => {
+  for (const [v, id] of [[{ score: 1.49, confidence: .8 }, 'standard'], [{ score: .1, confidence: .79 }, 'heavy'], [null, 'heavy']]) {
+    const h = harness([v]); assert.equal((await h.run()).model.id, id);
+    if (!v) assert.equal(h.state().judgeFailed, true);
   }
 });
 
-test('disabled routing skips judge and retains previous pair, or standard without previous', async () => {
-  const h = harness();
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabled: false, gears: h.targets }));
-  const result = await h.run({ previous: { model: model('manual'), thinkingLevel: 'low' } });
-  assert.equal(result.model.id, 'manual');
-  assert.equal(result.thinkingLevel, 'low');
-  assert.equal((await h.run()).model.id, 'standard');
-  assert.equal(h.calls.length, 0);
+test('candidate needs dialog confirmation; accepted switch is judged once and stays stable', async () => {
+  const h = harness([{ score: 1.9, confidence: .9 }, { score: 1.1, confidence: .9 }]);
+  await h.run();
+  const r = await h.run('好的，开始实现');
+  assert.equal(r.state.phase, 'implement'); assert.equal(r.model.id, 'standard'); assert.equal(r.thinkingLevel, 'medium');
+  assert.equal(h.dialogs.length, 1); assert.equal(h.calls.length, 2); assert.equal(h.calls[1].input.state.phase, 'implement');
+  await h.run('开始实现'); await h.run('继续'); assert.equal(h.calls.length, 2); assert.equal(h.dialogs.length, 1);
 });
 
-test('old state lacking turn identity does not suppress a new user judgment but keeps its gear', async () => {
-  const h = harness([0.2]);
-  const result = await h.run({ state: { gear: 'heavy', score: 1.8, adjustedScore: 1.8, confidence: 0.9, dispatch: { provider: 'test', model: 'heavy', thinkingLevel: 'high' }, phaseRoute: { version: 1, phase: 'plan', revising: false, planGear: 'heavy' } } });
-  assert.equal(result.model.id, 'heavy');
-  assert.equal(result.thinkingLevel, 'high');
-  assert.equal(result.state.score, 0.2);
-  assert.equal(h.calls.length, 1);
+test('declined, cancelled, ordinary, and negated messages never change phase or judge', async () => {
+  const h = harness(); await h.run(); h.ctx.ui.confirm = async () => false;
+  for (const text of ['开始实现', '请确认需求', '不要开始实现', 'do not start implementing', '解释一下', '继续']) await h.run(text);
+  assert.equal(h.state().phase, 'plan'); assert.equal(h.calls.length, 1);
 });
 
-
-test('router-failure retry prefers saved current turn over an older previous response', async () => {
-  const h = harness([1.8]);
-  const first = await h.run();
-  const retry = await h.run({ reason: 'retry', state: first.state,
-    previous: { model: model('light'), thinkingLevel: 'low' } });
-  assert.equal(retry.model.id, 'heavy');
-  assert.equal(retry.thinkingLevel, 'high');
-  assert.equal(h.calls.length, 1);
-});
-
-test('subsequent judge failure retains previous turn pair but records a new fallback', async () => {
-  const h = harness([1.8, null]);
-  const first = await h.run();
-  const next = await h.run({ state: first.state, messages: [user('next task', 2)] });
-  assert.equal(next.model.id, 'heavy');
-  assert.equal(next.state.fallbackReason, 'judge-unavailable');
-  assert.notEqual(next.state.turnId, first.state.turnId);
-  assert.equal(next.state.score, -1);
-  await h.run({ reason: 'continuation', state: next.state });
+test('without dialog UI keywords do not imply approval; explicit command still works', async () => {
+  const h = harness([null]); h.ctx.hasUI = false; h.ctx.mode = 'print'; await h.run('开始实现');
+  assert.equal(h.state().phase, 'plan');
+  await h.commands.get('gear-phase').handler('implement', h.ctx);
+  assert.equal(h.state().phase, 'plan');
+  const r = await h.run('继续'); assert.equal(r.state.phase, 'implement'); assert.equal(r.model.id, 'standard');
   assert.equal(h.calls.length, 2);
 });
 
-test('all configured gears unavailable uses previous, or throws actionable error', async () => {
-  const h = harness();
-  for (const gear of ['light', 'standard', 'heavy']) h.unavailable.add(gear);
-  const result = await h.run({ previous: { model: model('manual'), thinkingLevel: 'low' } });
-  assert.equal(result.model.id, 'manual');
-  assert.equal(result.state.dispatch.model, 'manual');
-  assert.equal(result.state.fallback, true);
-  await assert.rejects(h.run(), /settings.json.*authentication/);
-});
-
-test('same turn target vanishing resolves a fallback without another classifier call', async () => {
-  const h = harness([1.8]);
-  const first = await h.run();
-  h.unavailable.add('heavy');
-  const repeat = await h.run({ state: first.state });
-  assert.equal(repeat.model.id, 'standard');
-  assert.equal(repeat.state.fallbackReason, 'target-unavailable');
-  assert.equal(h.calls.length, 1);
-});
-
-test('disabled then re-enabled routing does not reuse a disabled verdict', async () => {
-  const h = harness([1.8]);
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabled: false, gears: h.targets }));
-  const first = await h.run();
-  assert.equal(first.state.fallbackReason, 'disabled');
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabled: true, gears: h.targets }));
-  const next = await h.run({ state: first.state });
-  assert.equal(next.model.id, 'heavy');
-  assert.equal(next.thinkingLevel, 'high');
-  assert.equal(next.state.sessionLock.gear, 'heavy');
-  assert.equal(next.state.score, 1.8);
-  assert.equal(h.calls.length, 1);
-});
-
-test('orphan continuation judges once; existing physical pair needs no classifier', async () => {
-  const h = harness();
-  const first = await h.run({ reason: 'continuation' });
-  assert.equal(h.calls.length, 1);
-  await h.run({ reason: 'continuation', state: first.state });
-  assert.equal(h.calls.length, 1);
-  const second = harness();
-  const result = await second.run({ reason: 'retry', failed: { model: model('manual'), thinkingLevel: 'low' } });
-  assert.equal(result.model.id, 'manual');
-  assert.equal(second.calls.length, 0);
-});
-
-test('three fresh user continuations inherit pair and status; fourth calls Jev once', async () => {
-  const h = harness([1.92, 1.9]);
-  h.entries.push({ type: 'message', id: 'u1', message: user('Complex payment races', 1) });
-  let r = await h.run({ messages: [user('Complex payment races', 1)] });
-  let last;
-  for (let n = 2; n <= 5; n++) {
-    h.entries.push({ type: 'custom', id: `s${n}`, customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: r.state } });
-    h.entries.push({ type: 'message', id: `u${n}`, message: user('继续', n) });
-    last = r;
-    r = await h.run({ state: r.state, messages: [user('Complex payment races', 1), user('继续', n)] });
-    assert.equal(r.model.id, 'heavy'); assert.equal(r.thinkingLevel, 'high');
-    assert.match(h.statuses.at(-1).text, /路由 计划 · heavy/);
-    if (n < 5) { assert.equal(r.state.decision.source, 'inherited'); assert.equal(r.state.inputTokens, 0); }
+test('high-confidence hard implementation holds original plan gear, not automatic escalation', async () => {
+  for (const initial of [1.1, 1.9]) {
+    const h = harness([{ score: initial, confidence: .9 }, { score: 1.9, confidence: .9 }]);
+    const plan = (await h.run()).model.id; const impl = await h.run('开始实现');
+    assert.equal(impl.model.id, plan);
   }
-  assert.equal(h.calls.length, 2);
-  assert.notEqual(last.state.turnId, r.state.turnId);
 });
 
-test('completion signal reassesses but cannot bypass the same-task downgrade window', async () => {
-  const h = harness([1.92, .2]);
-  h.ctx.modelRegistry.classify = async (_model, input) => {
-    h.calls.push(input);
-    return { stopReason: 'stop', answers: { gear: { type: 'score', score: h.calls.length === 1 ? 1.92 : .2, confidence: .9 }, relation: { type: 'choice', choice: 'same_task', confidence: .99, probabilities: { same_task: .98, new_task: .01, uncertain: .01 } } } };
-  };
-  h.entries.push({ type: 'message', id: 'u1', message: user('Complex task', 1) });
-  const first = await h.run({ messages: [user('Complex task', 1)] });
-  const done = { role: 'assistant', content: [{ type: 'text', text: '任务已完成。' }], timestamp: 2 };
-  h.entries.push({ type: 'custom', id: 's1', customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: first.state } }, { type: 'message', id: 'a1', message: done }, { type: 'message', id: 'u2', message: user('继续', 3) });
-  const next = await h.run({ state: first.state, messages: [user('Complex task', 1), done, user('继续', 3)] });
-  assert.equal(h.calls.length, 2); assert.equal(next.state.decision.trigger, 'completion-hint'); assert.equal(next.state.task.committedBand, 4); assert.equal(next.state.score, .2);
+test('phase command applies next user turn, restores original plan gear, and does not leak into continuation', async () => {
+  const h = harness([{ score: 1.9, confidence: .9 }, { score: 1, confidence: .9 }]); await h.run();
+  await h.commands.get('gear-phase').handler('implement', h.ctx);
+  const count = h.branch.length;
+  await h.run('', { reason: 'continuation', previous: { model: physical('heavy'), thinkingLevel: 'high' } });
+  assert.equal(h.state().phase, 'plan'); assert.equal(h.branch.length, count); assert.equal(h.calls.length, 1);
+  await h.run('继续'); assert.equal(h.state().phase, 'implement'); assert.equal(h.calls.length, 2);
+  await h.commands.get('gear-phase').handler('plan', h.ctx); await h.run('重新讨论');
+  assert.equal(h.state().phase, 'plan'); assert.equal(h.state().gear, 'heavy'); assert.equal(h.calls.length, 2);
+  await h.commands.get('gear-phase').handler('implement', h.ctx); await h.run('继续'); assert.equal(h.calls.length, 3);
 });
 
-test('disabling mid-turn never replaces the saved pair with an older previous response', async () => {
-  const h = harness([1.92]); const first = await h.run();
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabled: false, gears: h.targets }));
-  const repeat = await h.run({ state: first.state, previous: { model: model('light'), thinkingLevel: 'low' } });
-  assert.equal(repeat.model.id, 'heavy'); assert.equal(repeat.thinkingLevel, 'high'); assert.equal(h.calls.length, 1);
+test('duplicate, invalid and read-only commands do not classify or append', async () => {
+  const h = harness(); await h.run(); const length = h.branch.length;
+  for (const [name, arg] of [['gear-phase', 'plan'], ['gear-phase', 'invalid'], ['gear-phase', ''], ['gear-status', '']]) await h.commands.get(name).handler(arg, h.ctx);
+  assert.equal(h.branch.length, length); assert.equal(h.calls.length, 1);
+  assert.deepEqual(h.commands.get('gear-phase').getArgumentCompletions('im'), [{ value: 'implement', label: 'implement' }]);
 });
 
-test('cancellation prevents routing and classifier work', async () => {
-  const h = harness();
-  const controller = new AbortController();
-  controller.abort();
-  await assert.rejects(h.run({ signal: controller.signal }), { name: 'AbortError' });
-  assert.equal(h.calls.length, 0);
-});
-
-
-test('cancellation during classification never persists a fallback decision', async () => {
-  const h = harness();
-  const controller = new AbortController();
-  h.ctx.modelRegistry.classify = async () => {
-    controller.abort();
-    return { stopReason: 'error', answers: {} };
-  };
-  await assert.rejects(h.run({ signal: controller.signal }), { name: 'AbortError' });
-});
-
-test('cancellation during physical resolution restores footer and does not return candidate state', async () => {
-  const h = harness([1.92]); const abort = new AbortController();
-  h.ctx.modelRegistry.find = (_provider, id) => { abort.abort(); return model(id); };
-  await assert.rejects(h.run({ signal: abort.signal }), { name: 'AbortError' });
-  assert.equal(h.calls.length, 1); assert.equal(h.entries.length, 0); assert.equal(h.statuses.at(-1).text, undefined);
-});
-
-test('physical fallback retains task capability; next turn reassesses rather than inherits', async () => {
-  const h = harness([1.92, 1.92]); h.entries.push({ type: 'message', id: 'u1', message: user('Complex task', 1) });
-  h.unavailable.add('heavy');
-  const first = await h.run({ messages: [user('Complex task', 1)] });
-  assert.equal(first.state.gear, 'standard'); assert.equal(first.state.fallback, true); assert.equal(first.state.task.committedBand, 4);
-  h.entries.push({ type: 'custom', id: 's1', customType: 'pi.virtual-model-state', data: { provider: 'gears', modelId: 'auto', state: first.state } });
-  h.entries.push({ type: 'message', id: 'u2', message: user('继续', 2) });
-  await h.run({ state: first.state, messages: [user('继续', 2)] });
-  assert.equal(h.calls.length, 2);
-});
-
-test('continuation fallback stores its replacement pair when old dispatch becomes unavailable', async () => {
-  const h = harness([1.8]);
-  const first = await h.run();
-  h.unavailable.add('heavy');
-  const continuation = await h.run({ reason: 'continuation', state: first.state });
-  assert.equal(continuation.model.id, 'standard');
-  assert.equal(continuation.state.dispatch.model, 'standard');
-  assert.equal(continuation.state.gear, 'standard');
-  assert.equal(continuation.state.fallbackReason, 'target-unavailable');
+test('continuations/retries preserve actual pair; routing failure retry prefers saved current pair', async () => {
+  const h = harness(); await h.run();
+  const previous = { model: physical('other'), thinkingLevel: 'low' }, failed = { model: physical('failed'), thinkingLevel: 'medium' };
+  assert.equal((await h.run('', { reason: 'continuation', previous })).model.id, 'other');
+  assert.equal((await h.run('', { reason: 'retry', previous, failed })).model.id, 'failed');
+  assert.equal((await h.run('', { reason: 'retry', previous })).model.id, 'heavy');
   assert.equal(h.calls.length, 1);
 });
 
-test('custom bands select the initial gear, whose configured thinking stays locked', async () => {
-  const h = harness([0.9, 1.9]);
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ gears: h.targets, bands: [
-    { max: 1, gear: 'light', thinkingLevel: 'low' },
-    { gear: 'heavy', thinkingLevel: 'xhigh' },
-  ] }));
-  const result = await h.run();
-  assert.equal(result.model.id, 'standard');
-  assert.equal(result.thinkingLevel, 'medium');
-  const next = await h.run({ state: result.state, messages: [user('hard follow-up', 2)] });
-  assert.equal(next.model.id, 'standard');
-  assert.equal(next.thinkingLevel, 'medium');
-  assert.equal(next.state.score, 1.9);
+test('same-turn route is idempotent including dialog decline', async () => {
+  const h = harness(); const messages = [user('开始实现', 7)]; h.ctx.ui.confirm = async (...args) => { h.dialogs.push(args); return false; };
+  await h.run('', { messages }); const second = await h.run('', { messages });
+  assert.equal(second.state, undefined); assert.equal(h.calls.length, 1); assert.equal(h.dialogs.length, 1);
+});
+
+test('light is only fallback after standard AND heavy, and recovered targets do not oscillate', async () => {
+  const h = harness([{ score: 1, confidence: .9 }]); h.missing.add('standard');
+  assert.equal((await h.run()).model.id, 'heavy');
+  h.missing.clear(); assert.equal((await h.run('继续')).model.id, 'heavy');
+  const h2 = harness(); h2.noAuth.add('heavy'); h2.noAuth.add('standard');
+  assert.equal((await h2.run()).model.id, 'light'); assert.equal(h2.state().fallback, true);
+});
+
+test('lost availability resolves again, config changes take effect only on next user turn', async () => {
+  const h = harness(); await h.run(); h.missing.add('heavy'); assert.equal((await h.run()).model.id, 'standard');
+  h.settings.gears.heavy.model = 'new-heavy'; h.save();
+  assert.equal((await h.run('', { reason: 'continuation', previous: { model: physical('standard'), thinkingLevel: 'medium' } })).model.id, 'standard');
+  assert.equal((await h.run()).model.id, 'new-heavy'); assert.equal(h.calls.length, 1);
+});
+
+test('all gears unavailable use historical physical model or report actionable error', async () => {
+  const h = harness(); for (const g of ['light', 'standard', 'heavy']) h.missing.add(g);
+  const r = await h.run('task', { previous: { model: physical('manual'), thinkingLevel: 'low' } }); assert.equal(r.model.id, 'manual');
+  h.noAuth.add('manual');
+  await assert.rejects(h.run('task'), /no authenticated physical model.*settings.json/);
+});
+
+test('virtual targets cannot be dispatched and physical thinking is clamped', async () => {
+  const h = harness(); h.ctx.modelRegistry.find = (_p, id) => id === 'heavy' ? { ...physical(id), api: 'pi-virtual' } : { ...physical(id), reasoning: false };
+  const r = await h.run(); assert.equal(r.model.id, 'standard'); assert.equal(r.thinkingLevel, 'off');
+});
+
+test('disabled and direct routes do not classify or change phase state', async () => {
+  const h = harness([], { enabled: false }); assert.equal((await h.run()).model.id, 'standard'); assert.equal(h.state(), undefined); assert.equal(h.calls.length, 0);
+  const direct = harness(); const result = await direct.run('', { reason: 'direct' });
+  assert.equal(result.model.id, 'standard'); assert.equal(result.state, undefined); assert.equal(direct.calls.length, 0);
+});
+
+test('old observer state resets to plan; compatible task phase is retained without judgment', async () => {
+  const h = harness(); const old = { version: 1, mode: 'observer', dispatch: { provider: 'offline', model: 'standard', thinkingLevel: 'medium' } };
+  assert.equal((await h.run('task', { state: old })).state.phase, 'plan');
+  const h2 = harness(); const oldTask = { gear: 'standard', fallback: false, phaseRoute: { version: 1, phase: 'implement', revising: true, planGear: 'heavy', implementGear: 'standard' } };
+  assert.equal((await h2.run('task', { state: oldTask })).state.phase, 'implement'); assert.equal(h2.calls.length, 0);
+});
+
+test('already-aborted and in-flight cancellation never commit a new decision', async () => {
+  const h = harness(); const abort = new AbortController(); abort.abort();
+  await assert.rejects(h.run('task', { signal: abort.signal }), { name: 'AbortError' }); assert.equal(h.calls.length, 0);
+  const later = new AbortController(); h.ctx.modelRegistry.classify = async () => { later.abort(); return { stopReason: 'aborted', answers: {} }; };
+  await assert.rejects(h.run('task', { signal: later.signal }), { name: 'AbortError' }); assert.equal(h.state(), undefined);
+});
+
+test('does not register any tools, guidance/context or workflow lifecycle hooks', () => {
+  const h = harness(); assert.deepEqual([...h.handlers.keys()].sort(), ['model_select', 'session_shutdown', 'session_start', 'session_tree']);
+});
+
+test('TUI reports evaluation, phase, actual model/thinking and failure, clears on manual selection', async () => {
+  const h = harness([null]); await h.run();
+  assert.ok(h.statuses.some(s => s?.includes('评估中'))); assert.match(h.statuses.at(-1), /计划.*offline\/heavy.*high.*Jev 不可用/);
+  h.ctx.model = physical('manual'); h.handlers.get('model_select')({}, h.ctx); assert.equal(h.statuses.at(-1), undefined);
+});
+
+test('queued commands can be cancelled/superseded before a user turn, and status reports pending', async () => {
+  const h = harness(); await h.run();
+  await h.commands.get('gear-phase').handler('implement', h.ctx);
+  await h.commands.get('gear-phase').handler('', h.ctx); assert.match(h.notifications.at(-1).text, /下一条消息切换到实现/);
+  await h.commands.get('gear-phase').handler('plan', h.ctx); await h.run('继续');
+  assert.equal(h.state().phase, 'plan'); assert.equal(h.calls.length, 1);
+  const count = h.branch.length; await h.commands.get('gear-phase').handler('plan', h.ctx); assert.equal(h.branch.length, count);
+});
+
+test('command before first turn enters implementation with one classification', async () => {
+  const h = harness(); await h.commands.get('gear-phase').handler('implement', h.ctx);
+  const r = await h.run('执行已确认的方案'); assert.equal(r.state.phase, 'implement'); assert.equal(h.calls.length, 1); assert.equal(h.dialogs.length, 0);
+});
+
+test('disabled mid-session neither consumes pending commands nor calls Jev', async () => {
+  const h = harness(); await h.run(); await h.commands.get('gear-phase').handler('implement', h.ctx);
+  h.settings.enabled = false; h.save(); await h.run('继续');
+  assert.equal(h.state().phase, 'plan'); assert.equal(h.calls.length, 1); assert.match(h.statuses.at(-1), /路由已关闭/);
+  await h.commands.get('gear-status').handler('', h.ctx); assert.match(h.notifications.at(-1).text, /路由已关闭/);
+  h.settings.enabled = true; h.save(); await h.run('继续'); assert.equal(h.state().phase, 'implement'); assert.equal(h.calls.length, 2);
+});
+
+test('RPC dialog is supported and print keywords never invoke a dialog', async () => {
+  const h = harness(); h.ctx.mode = 'rpc'; await h.run(); await h.run('开始实现');
+  assert.equal(h.state().phase, 'implement'); assert.equal(h.dialogs.length, 1); assert.equal(h.statuses.length, 0);
+});
+
+test('manual model selection is reported honestly by read-only status', async () => {
+  const h = harness(); await h.run(); h.ctx.model = physical('manual');
+  await h.commands.get('gear-status').handler('', h.ctx); assert.match(h.notifications.at(-1).text, /手选物理模型；路由未运行/);
+});
+
+test('non-TUI modes never use terminal status UI; shutdown clears only TUI', async () => {
+  const h = harness(); h.ctx.mode = 'rpc'; await h.run(); assert.equal(h.statuses.length, 0);
+  h.ctx.mode = 'tui'; h.handlers.get('session_start')({}, h.ctx); assert.match(h.statuses.at(-1), /计划/);
+  h.handlers.get('session_shutdown')({}, h.ctx); assert.equal(h.statuses.at(-1), undefined);
 });
