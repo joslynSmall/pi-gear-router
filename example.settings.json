@@ -23,8 +23,8 @@
   // -1..1。按 gearBias × 0.4 平移分数后落档：负值偏向低成本档位，正值偏向高能力档位。
   "gearBias": 0,
 
-  // 分数区间 → 档位 + thinking level。有序数组，下标即能力区间。
-  // 前 N-1 项必须带 max（升序、位于 (0,2) 之间），最后一项省略 max 并兜底到 2.0。
+  // 分数区间 → 首次选档。默认 task 模式锁定该档 gears.thinkingLevel，后续分数不换模型或思考深度。
+  // legacy workflow 仍使用区间 thinking。前 N-1 项必须带 max（升序、位于 (0,2)），最后一项省略 max。
   // 长度 1..16；省略则使用内置默认五档。gear 必须是 gears 中配置的档位名。
   "bands": [
     { "max": 0.5, "gear": "light",    "thinkingLevel": "high" },
@@ -35,7 +35,7 @@
   ],
 
   // 三个物理档位：provider/model 必须指向 Pi 已配置且已鉴权的目标。
-  // thinkingLevel 只在 direct、无有效判决、兜底等没有区间等级可用的场合生效。
+  // 默认 task 模式锁定后使用所选档位的 thinkingLevel，不再按后续分数改它。
   "gears": {
     "light":    { "provider": "yourprovider", "model": "cheap-model-id",    "thinkingLevel": "high" },
     "standard": { "provider": "yourprovider", "model": "balanced-model-id", "thinkingLevel": "medium" },
@@ -58,7 +58,8 @@
   },
 
   // 阶段编排为显式 opt-in；默认 false，不改变既有 task-aware 路由。
-  // 启用后，交付请求可在一个 agent run 内经“只读规划/恢复 → 已验证 handoff → 执行/验证”。
+  // 启用后，交付请求可在一个 agent run 内经“规划/恢复 → 已验证 handoff → 执行/验证”。
+  // 阶段只提示工作重点与控制路由，所有工具权限交给 Pi 及已有权限扩展。
   // 这不会在不同物理模型间迁移 KV/prompt cache；阶段切换可能是一次新的 cache miss。
   "workflow": {
     "enabled": false,
