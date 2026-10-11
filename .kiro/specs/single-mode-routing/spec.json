@@ -1,5 +1,5 @@
 {
-  "feature_name": "observer-guided-routing",
+  "feature_name": "single-mode-routing",
   "phase": "implementation",
   "approvals": {
     "requirements": {
@@ -15,5 +15,6 @@
       "approved": true
     }
   },
+  "approval_basis": "用户在对话中确认单一模式及删除 Skill 推荐，并要求继续实施",
   "ready_for_implementation": true
 }

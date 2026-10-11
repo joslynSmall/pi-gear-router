@@ -1,9 +1,5 @@
-# Aegis Workspace Index
+# Aegis 工作区索引
 
-This index tracks files created under this project's `docs/aegis/` workspace.
-Entries are workspace records, not authoritative runtime decisions.
+本目录保留通用方法记录，不是路由运行规范。
 
-| Date | Kind | Path | Title |
-| --- | --- | --- | --- |
-| 2026-10-10 | spec | docs/aegis/specs/2026-10-10-configurable-bands-design.md | 可配置分档表 bands 设计 |
-| 2026-10-10 | plan | docs/aegis/plans/2026-10-10-configurable-bands.md | 可配置分档表 bands 实现计划 |
+0.2.0 已移除 configurable-bands 设计与实施计划，因为 bands 不再属于当前配置。历史文件见 Git；现行规格在 [single-mode-routing](../../.kiro/specs/single-mode-routing/requirements.md)。

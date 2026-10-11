@@ -1,79 +1,17 @@
-// pi-gear-router 配置示例（JSONC，支持 // 与 /* */ 注释）。
-// 复制为 ~/.pi/agent/pi-gear-router/settings.json（用户级）
-// 或 <项目根>/.pi/pi-gear-router/settings.json（项目级，按字段覆盖用户级）。
-// 省略任何字段都会使用内置默认值。
+// pi-gear-router 0.2 配置（JSONC）。
+// 用户级：~/.pi/agent/pi-gear-router/settings.json
+// 项目级：<项目根>/.pi/pi-gear-router/settings.json，仅在 Pi project trust 已确认时加载。
+// 未指定字段继承，gears 按档位覆盖；旧模式／bands／observer／workflow 等字段忽略。
 {
-  // 是否启用路由。false 时不调用 Jev，优先沿用最近实际使用的物理模型与等级。
+  // false 时不调用 Jev，沿用已有物理模型；无历史用 standard。
   "enabled": true,
-
-  // 默认 task；observer 需显式修改为 "observer" 且 workflow.enabled:false。
-  // task/observer 与 workflow.enabled:true 冲突时 legacy-workflow 优先并诊断。
-  // observer 项目级全部 overrides 要求 Pi project trust；不代表工具修改授权。
-  "routingMode": "task",
-  "observer": {
-    "guidance": { "enabled": true, "maxCandidates": 2, "maxChars": 800, "maxPerTask": 6 },
-    "skills": { "enabled": true },
-    "stageAware": true,
-    "minBands": { "converge": 3, "implement": 1, "verify": 1, "respond": 0 },
-    "maxCallsPerTask": 24,
-    "maxTransitions": 4,
-    "maxTransportRetries": 0
-  },
-
-  // -1..1。按 gearBias × 0.4 平移分数后落档：负值偏向低成本档位，正值偏向高能力档位。
-  "gearBias": 0,
-
-  // 分数区间 → 首次选档。默认 task 模式锁定该档 gears.thinkingLevel，后续分数不换模型或思考深度。
-  // legacy workflow 仍使用区间 thinking。前 N-1 项必须带 max（升序、位于 (0,2)），最后一项省略 max。
-  // 长度 1..16；省略则使用内置默认五档。gear 必须是 gears 中配置的档位名。
-  "bands": [
-    { "max": 0.5, "gear": "light",    "thinkingLevel": "high" },
-    { "max": 1.0, "gear": "standard", "thinkingLevel": "medium" },
-    { "max": 1.5, "gear": "standard", "thinkingLevel": "high" },
-    { "max": 1.8, "gear": "heavy",    "thinkingLevel": "high" },
-    {               "gear": "heavy",    "thinkingLevel": "xhigh" }
-  ],
-
-  // 三个物理档位：provider/model 必须指向 Pi 已配置且已鉴权的目标。
-  // 默认 task 模式锁定后使用所选档位的 thinkingLevel，不再按后续分数改它。
+  // 必须是 Pi 已配置且有凭据的物理模型；档位 thinking 按模型支持范围裁剪。
   "gears": {
-    "light":    { "provider": "yourprovider", "model": "cheap-model-id",    "thinkingLevel": "high" },
+    // light 只在 standard、heavy 不可用时兜底，不按简单消息主动选择。
+    "light": { "provider": "yourprovider", "model": "fallback-model-id", "thinkingLevel": "low" },
     "standard": { "provider": "yourprovider", "model": "balanced-model-id", "thinkingLevel": "medium" },
-    "heavy":    { "provider": "yourprovider", "model": "frontier-model-id", "thinkingLevel": "high" }
+    "heavy": { "provider": "yourprovider", "model": "frontier-model-id", "thinkingLevel": "high" }
   },
-
-  // Jev 分类调用总 deadline（毫秒）。observer 默认无 retry，可选最多一次 transport retry。
-  "judgeTimeoutMs": 15000,
-
-  // 任务感知路由参数。省略则使用内置默认。
-  "taskRouting": {
-    // 连续免评估回合上限；0 关闭跨轮免评估。整数 0..10。
-    "maxInheritedTurns": 3,
-    // 降档所需的最近可信、不同上下文样本数。整数 2..8。
-    "downgradeWindow": 2,
-    // 降档目标边界的保护裕量。0..0.15。
-    "downgradeMargin": 0.08,
-    // 评分与关系确认门槛，不等同于准确率。0.5..1。
-    "minConfidence": 0.8
-  },
-
-  // 阶段编排为显式 opt-in；默认 false，不改变既有 task-aware 路由。
-  // 启用后，交付请求可在一个 agent run 内经“规划/恢复 → 已验证 handoff → 执行/验证”。
-  // 阶段只提示工作重点与控制路由，所有工具权限交给 Pi 及已有权限扩展。
-  // 这不会在不同物理模型间迁移 KV/prompt cache；阶段切换可能是一次新的 cache miss。
-  "workflow": {
-    "enabled": false,
-    // 各阶段最小 capability band 下标（基于上方 bands 数组）。
-    "planningMinBand": 3,
-    "executionMinBand": 1,
-    "atomicExecutionMinBand": 0,
-    "verificationMinBand": 1,
-    "recoveryMinBand": 3,
-    // handoff 的 delivery/readiness/risk/capability Jev 判定最小置信度。0.5..1。
-    "handoffMinConfidence": 0.8,
-    // 一个 workflow 最多可消费的阶段转换。1..8。
-    "maxTransitions": 6,
-    // planning/recovery 自然结束但无 handoff 时的自动提醒次数；只能是 0 或 1。
-    "maxReminderContinuations": 1
-  }
+  // 仅首轮及进入实现调用；总超时包含最多两次传输重试。
+  "judgeTimeoutMs": 15000
 }
